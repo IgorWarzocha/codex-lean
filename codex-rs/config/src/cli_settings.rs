@@ -10,6 +10,7 @@ pub enum CliSetting {
     Retention,
     IdleRollover,
     Runtime,
+    QuestionsOutsidePlan,
     MultiAgent,
     WaitAgent,
     Screenless,
@@ -19,11 +20,12 @@ pub enum CliSetting {
 }
 
 impl CliSetting {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Context,
         Self::Retention,
         Self::IdleRollover,
         Self::Runtime,
+        Self::QuestionsOutsidePlan,
         Self::MultiAgent,
         Self::WaitAgent,
         Self::Screenless,
@@ -38,6 +40,7 @@ impl CliSetting {
             Self::Retention => "compaction-retention",
             Self::IdleRollover => "notes-idle-rollover",
             Self::Runtime => "code-mode",
+            Self::QuestionsOutsidePlan => "questions-outside-plan",
             Self::MultiAgent => "multi-agent",
             Self::WaitAgent => "subagent-wait",
             Self::Screenless => "voice-screenless",
@@ -53,6 +56,7 @@ impl CliSetting {
             Self::Retention => "Compaction retention",
             Self::IdleRollover => "Notes idle rollover",
             Self::Runtime => "Code Mode runtime",
+            Self::QuestionsOutsidePlan => "Questions outside Plan mode",
             Self::MultiAgent => "Multi-agent tools",
             Self::WaitAgent => "Subagent wait tool",
             Self::Screenless => "Speak public progress and typed results",
@@ -75,6 +79,9 @@ impl CliSetting {
             }
             Self::Runtime => {
                 "New threads only. Notebook needs a single local environment, full-access permissions and Deno. Deno uses an explicit path, PATH or a verified managed download. No permissions are changed. V8 supports sandboxed Code Mode. Off disables configured Code Mode, but a model that requires Code Mode can still select it."
+            }
+            Self::QuestionsOutsidePlan => {
+                "New threads only. Off keeps the question tool in Plan mode. On also allows waiting and asynchronous questions outside Plan mode, where supported."
             }
             Self::MultiAgent => {
                 "New threads only. Off disables both tool generations. Legacy uses original subagent tools. V2 uses task-oriented tools. Board availability also depends on session storage."
@@ -152,6 +159,10 @@ impl CliSetting {
                 ("features.multi_agent", json!(choice != "off")),
                 ("features.multi_agent_v2.enabled", json!(choice == "v2")),
             ],
+            Self::QuestionsOutsidePlan => vec![(
+                "features.default_mode_request_user_input",
+                json!(choice == "on"),
+            )],
             Self::WaitAgent => vec![(
                 "features.multi_agent_v2.wait_agent_enabled",
                 json!(choice == "on"),
@@ -216,6 +227,12 @@ impl CliSetting {
                     "legacy".into()
                 }
             }
+            Self::QuestionsOutsidePlan => if enabled("default_mode_request_user_input", false) {
+                "on"
+            } else {
+                "off"
+            }
+            .into(),
             Self::Acknowledgements => match config
                 .pointer("/realtime/delegation_ack_filler")
                 .and_then(Value::as_bool)
@@ -269,6 +286,22 @@ impl CliSetting {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn questions_outside_plan_requires_explicit_opt_in_and_reads_back_the_same_flag() {
+        let setting = CliSetting::QuestionsOutsidePlan;
+        assert_eq!(setting.configured_choice(&json!({})), "off");
+        for (choice, enabled) in [("on", true), ("off", false)] {
+            assert_eq!(
+                setting.edits(choice).unwrap(),
+                vec![("features.default_mode_request_user_input", json!(enabled))]
+            );
+            let config = json!({"features": {"default_mode_request_user_input": enabled}});
+            assert_eq!(setting.configured_choice(&config), choice);
+            assert!(setting.matches_edits(&config, choice));
+            assert!(!setting.matches_edits(&config, if enabled { "off" } else { "on" }));
+        }
+    }
 
     #[test]
     fn runtime_readback_checks_all_controls_not_just_label() {

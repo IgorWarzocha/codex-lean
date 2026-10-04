@@ -10,6 +10,7 @@ use crate::tools::handlers::request_user_input_spec::RequestUserInputToolArgs;
 use crate::tools::handlers::request_user_input_spec::UserInputDelivery;
 use crate::tools::handlers::request_user_input_spec::create_request_user_input_tool;
 use crate::tools::handlers::request_user_input_spec::normalize_request_user_input_tool_args;
+use crate::tools::handlers::request_user_input_spec::request_user_input_async_available;
 use crate::tools::handlers::request_user_input_spec::request_user_input_tool_description;
 use crate::tools::handlers::request_user_input_spec::request_user_input_unavailable_message;
 use crate::tools::registry::CoreToolRuntime;
@@ -98,6 +99,7 @@ impl RequestUserInputHandler {
         let ToolInvocation {
             session,
             turn,
+            step_context,
             call_id,
             payload,
             ..
@@ -118,11 +120,23 @@ impl RequestUserInputHandler {
             ));
         }
 
+        let mode = step_context.settings.effective_collaboration_mode().mode;
+        let modes = codex_tools::request_user_input_available_modes(&turn.config.features);
+        if let Some(message) = request_user_input_unavailable_message(mode, &modes) {
+            return Err(FunctionCallError::RespondToModel(message));
+        }
         let args: RequestUserInputToolArgs = parse_arguments(&arguments)?;
         let args = normalize_request_user_input_tool_args(args)
             .map_err(FunctionCallError::RespondToModel)?;
         if args.delivery == UserInputDelivery::Async {
-            if !self.async_enabled {
+            if !self.async_enabled
+                || !request_user_input_async_available(
+                    &turn.session_source,
+                    &step_context.settings.model_info,
+                    &turn.config.features,
+                    mode,
+                )
+            {
                 return Err(FunctionCallError::RespondToModel(
                     "request_user_input async delivery is unavailable for this model".to_string(),
                 ));
@@ -135,7 +149,6 @@ impl RequestUserInputHandler {
             )?));
         }
 
-        let mode = turn.collaboration_mode().mode;
         if let Some(message) = request_user_input_unavailable_message(mode, &self.available_modes) {
             return Err(FunctionCallError::RespondToModel(message));
         }

@@ -633,6 +633,7 @@ async fn reviewer_tool_policy_exclude_optional_core_tools() {
         &session,
         step_context.turn.as_ref(),
         &step_context.settings.model_info,
+        step_context.settings.effective_collaboration_mode().mode,
         &step_context.environments,
         &step_context.mcp,
         /*apps_enabled*/ false,
@@ -685,6 +686,7 @@ async fn reviewer_tool_policy_respect_managed_shell_restrictions() {
             &session,
             step_context.turn.as_ref(),
             &step_context.settings.model_info,
+            step_context.settings.effective_collaboration_mode().mode,
             &step_context.environments,
             &step_context.mcp,
             /*apps_enabled*/ false,
@@ -721,6 +723,7 @@ async fn reviewer_tool_policy_preserve_code_mode() {
         &session,
         step_context.turn.as_ref(),
         &step_context.settings.model_info,
+        step_context.settings.effective_collaboration_mode().mode,
         &step_context.environments,
         &step_context.mcp,
         /*apps_enabled*/ false,
@@ -791,6 +794,7 @@ async fn reviewer_tool_policy_require_managed_secondary_environments() {
             &session,
             step_context.turn.as_ref(),
             &step_context.settings.model_info,
+            step_context.settings.effective_collaboration_mode().mode,
             &step_context.environments,
             &step_context.mcp,
             /*apps_enabled*/ false,
@@ -935,12 +939,16 @@ async fn wait_for_environment_falls_back_for_oversized_host_configuration() {
 
 #[tokio::test]
 async fn request_user_input_tool_respects_experimental_config_gate() {
-    let enabled = probe(|_| {}).await;
+    let enabled = probe(|turn| {
+        set_feature(turn, Feature::DefaultModeRequestUserInput, true);
+    })
+    .await;
     enabled.assert_visible_contains(&["request_user_input"]);
     enabled.assert_registered_contains(&["request_user_input"]);
     assert_eq!(enabled.exposure("request_user_input"), ToolExposure::Direct);
 
     let disabled = probe(|turn| {
+        set_feature(turn, Feature::DefaultModeRequestUserInput, true);
         update_config(turn, |config| {
             config.experimental_request_user_input_enabled = false;
         });
@@ -966,12 +974,77 @@ async fn update_plan_tool_respects_config_gate() {
     enabled.assert_registered_contains(&["update_plan"]);
 }
 
+#[test_case::test_case(ToolMode::Direct; "direct")]
+#[test_case::test_case(ToolMode::CodeMode; "code_mode")]
+#[test_case::test_case(ToolMode::CodeModeOnly; "notebook_inline")]
+#[tokio::test]
+async fn request_user_input_discovery_follows_mode_opt_in(mode: ToolMode) {
+    for (collaboration_mode, opt_in, enabled) in [
+        (
+            codex_protocol::config_types::ModeKind::Default,
+            false,
+            false,
+        ),
+        (codex_protocol::config_types::ModeKind::Default, true, true),
+        (codex_protocol::config_types::ModeKind::Plan, false, true),
+    ] {
+        let plan = probe(|turn| {
+            set_feature(turn, Feature::DefaultModeRequestUserInput, opt_in);
+            if mode == ToolMode::CodeModeOnly {
+                update_config(turn, |config| {
+                    config.code_mode.runtime = codex_features::CodeModeRuntime::Notebook;
+                });
+            }
+            set_feature(turn, Feature::CodeMode, mode != ToolMode::Direct);
+            set_feature(turn, Feature::CodeModeOnly, mode == ToolMode::CodeModeOnly);
+            turn.code_mode_available = true;
+            update_turn_settings_for_test(turn, |settings| {
+                crate::session::tests::update_selected_settings_for_test(settings, |selected| {
+                    selected.collaboration_mode.mode = collaboration_mode;
+                });
+                let model = Arc::make_mut(&mut settings.model_info);
+                model.tool_mode = Some(mode);
+                model.experimental_supported_tools = vec!["request_user_input_async".to_string()];
+            });
+        })
+        .await;
+        if enabled {
+            plan.assert_registered_contains(&["request_user_input", "request_user_input_async"]);
+        } else {
+            plan.assert_registered_lacks(&["request_user_input", "request_user_input_async"]);
+            plan.assert_visible_lacks(&["request_user_input", "request_user_input_async"]);
+            assert!(!plan.code_mode_tool_names.contains_key("request_user_input"));
+            assert!(
+                !plan
+                    .code_mode_instructions
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("request_user_input")
+            );
+            if mode == ToolMode::CodeModeOnly {
+                let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME)
+                else {
+                    panic!("exec tool")
+                };
+                assert!(!exec.description.contains("request_user_input"));
+            }
+        }
+    }
+}
+
 #[test_case::test_case(ToolMode::CodeMode; "code_mode")]
 #[test_case::test_case(ToolMode::CodeModeOnly; "code_mode_only")]
 #[tokio::test]
 async fn request_user_input_is_nested_in_code_mode(mode: ToolMode) {
     let plan = probe(|turn| {
-        set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
+        set_features(
+            turn,
+            &[
+                Feature::CodeMode,
+                Feature::CodeModeOnly,
+                Feature::DefaultModeRequestUserInput,
+            ],
+        );
         turn.code_mode_available = true;
         update_turn_settings_for_test(turn, |settings| {
             Arc::make_mut(&mut settings.model_info).tool_mode = Some(mode);
@@ -997,6 +1070,51 @@ async fn request_user_input_is_nested_in_code_mode(mode: ToolMode) {
     };
     if mode == ToolMode::CodeModeOnly {
         assert!(exec.description.contains("request_user_input"));
+    }
+}
+
+#[tokio::test]
+async fn question_tool_router_uses_captured_mode_not_initial_turn_mode() {
+    use codex_protocol::config_types::ModeKind;
+
+    for mode in [ModeKind::Plan, ModeKind::Default] {
+        let (session, mut turn) = make_direct_tool_plan_context().await;
+        set_feature(&mut turn, Feature::DefaultModeRequestUserInput, false);
+        update_turn_settings_for_test(&mut turn, |settings| {
+            crate::session::tests::update_selected_settings_for_test(settings, |selected| {
+                selected.collaboration_mode.mode = if mode == ModeKind::Plan {
+                    ModeKind::Default
+                } else {
+                    ModeKind::Plan
+                };
+            });
+            Arc::make_mut(&mut settings.model_info).experimental_supported_tools =
+                vec!["request_user_input_async".to_string()];
+        });
+        let turn = Arc::new(turn);
+        let mut step_context = StepContext::for_test(Arc::clone(&turn));
+        crate::session::tests::update_selected_settings_for_test(
+            Arc::make_mut(&mut Arc::get_mut(&mut step_context).unwrap().settings),
+            |selected| selected.collaboration_mode.mode = mode,
+        );
+        let router = super::build_tool_router(
+            &session,
+            &turn,
+            &step_context.settings.model_info,
+            step_context.settings.effective_collaboration_mode().mode,
+            &step_context.environments,
+            &step_context.mcp,
+            false,
+            &turn.extension_data,
+            None,
+        )
+        .expect("captured tool router");
+        let plan = ToolPlanProbe::from_router(router);
+        if mode == ModeKind::Plan {
+            plan.assert_registered_contains(&["request_user_input", "request_user_input_async"]);
+        } else {
+            plan.assert_registered_lacks(&["request_user_input", "request_user_input_async"]);
+        }
     }
 }
 

@@ -13,7 +13,9 @@ fn plan_only_available_modes() -> Vec<ModeKind> {
 }
 
 fn default_available_modes() -> Vec<ModeKind> {
-    request_user_input_available_modes(&Features::with_defaults())
+    let mut features = Features::with_defaults();
+    features.enable(Feature::DefaultModeRequestUserInput);
+    request_user_input_available_modes(&features)
 }
 
 #[test_case(false, json!(["wait"]); "wait_only")]

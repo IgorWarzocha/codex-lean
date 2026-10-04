@@ -50,6 +50,7 @@ use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHa
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::tools::handlers::request_user_input_spec::request_user_input_async_available;
+use crate::tools::handlers::request_user_input_spec::request_user_input_mode_available;
 use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -70,6 +71,7 @@ use codex_mcp::CODEX_APPS_MCP_SERVER_NAME;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::account::PlanType;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::dynamic_tools::DynamicToolNamespaceTool;
 use codex_protocol::dynamic_tools::DynamicToolSpec;
@@ -111,6 +113,7 @@ struct CoreToolPlanContext<'a> {
     tool_policy: &'a codex_extension_api::ToolPolicy,
     turn_context: &'a TurnContext,
     model_info: &'a ModelInfo,
+    collaboration_mode: ModeKind,
     environments: &'a TurnEnvironmentSnapshot,
     mcp: &'a codex_mcp::McpBinding,
     tool_suggest_candidates: Option<&'a crate::tools::router::ToolSuggestCandidates>,
@@ -125,6 +128,7 @@ pub(crate) fn build_tool_router(
     session: &Session,
     turn_context: &TurnContext,
     model_info: &ModelInfo,
+    collaboration_mode: ModeKind,
     environments: &TurnEnvironmentSnapshot,
     mcp: &Arc<codex_mcp::McpBinding>,
     apps_enabled: bool,
@@ -141,6 +145,7 @@ pub(crate) fn build_tool_router(
         tool_policy: &session.tool_policy,
         turn_context,
         model_info,
+        collaboration_mode,
         environments,
         mcp,
         tool_suggest_candidates,
@@ -286,6 +291,7 @@ pub(crate) fn build_core_tool_registry(
         tool_policy: &Default::default(),
         turn_context,
         model_info,
+        collaboration_mode: turn_context.collaboration_mode().mode,
         environments,
         mcp,
         tool_suggest_candidates,
@@ -1210,12 +1216,19 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         );
     }
 
-    let async_user_input_enabled =
-        request_user_input_async_available(&turn_context.session_source, context.model_info);
-    if turn_context.config.experimental_request_user_input_enabled || async_user_input_enabled {
+    let async_user_input_enabled = request_user_input_async_available(
+        &turn_context.session_source,
+        context.model_info,
+        features,
+        context.collaboration_mode,
+    );
+    let wait_user_input_enabled = turn_context.config.experimental_request_user_input_enabled
+        && !turn_context.session_source.is_non_root_agent()
+        && request_user_input_mode_available(features, context.collaboration_mode);
+    if wait_user_input_enabled || async_user_input_enabled {
         registry.add_with_exposure(
             RequestUserInputHandler {
-                available_modes: if turn_context.config.experimental_request_user_input_enabled {
+                available_modes: if wait_user_input_enabled {
                     request_user_input_available_modes(features)
                 } else {
                     Vec::new()

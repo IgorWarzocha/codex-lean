@@ -346,6 +346,10 @@ async fn astra_asks_an_async_question_and_receives_the_answer_while_working() ->
         .with_config(move |config| {
             configure_scenario_catalog(config);
             config
+                .features
+                .enable(Feature::DefaultModeRequestUserInput)
+                .expect("explicit question opt-in");
+            config
                 .model_catalog
                 .as_mut()
                 .expect("scenario model catalog")

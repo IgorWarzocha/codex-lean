@@ -29,7 +29,6 @@ fn under_development_features_require_fork_approval_to_default_on() {
                     | Feature::AgentMessageBoard
                     | Feature::CodeMode
                     | Feature::CodeModePrewarm
-                    | Feature::DefaultModeRequestUserInput
                     | Feature::MultiAgentV2DynamicTools
             );
             assert_eq!(
@@ -48,7 +47,6 @@ fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
         Feature::AgentMessageBoard,
         Feature::CodeMode,
         Feature::CodeModePrewarm,
-        Feature::DefaultModeRequestUserInput,
         Feature::MultiAgentV2,
         Feature::MultiAgentV2DynamicTools,
     ];
@@ -67,7 +65,6 @@ apply_patch_preserve_line_endings = false
 agent_message_board = false
 code_mode = false
 code_mode_prewarm = false
-default_mode_request_user_input = false
 multi_agent_v2_dynamic_tools = false
 [multi_agent_v2]
 enabled = false
@@ -119,6 +116,22 @@ fn executor_capability_discovery_is_an_opt_in_map_feature() {
     )]));
 
     assert!(features.enabled(Feature::ExecutorCapabilityDiscovery));
+}
+
+#[test]
+fn default_mode_request_user_input_requires_explicit_opt_in() {
+    let mut features = Features::with_defaults();
+    assert!(!features.enabled(Feature::DefaultModeRequestUserInput));
+    features.apply_map(&BTreeMap::from([(
+        "default_mode_request_user_input".to_string(),
+        true,
+    )]));
+    assert!(features.enabled(Feature::DefaultModeRequestUserInput));
+    features.apply_map(&BTreeMap::from([(
+        "default_mode_request_user_input".to_string(),
+        false,
+    )]));
+    assert!(!features.enabled(Feature::DefaultModeRequestUserInput));
 }
 
 #[test]
@@ -177,7 +190,6 @@ fn default_enabled_features_are_stable_or_fork_approved() {
                             | Feature::AgentMessageBoard
                             | Feature::CodeMode
                             | Feature::CodeModePrewarm
-                            | Feature::DefaultModeRequestUserInput
                             | Feature::MultiAgentV2DynamicTools
                     ),
                 "feature `{}` is enabled by default but is not stable or fork-approved ({:?})",

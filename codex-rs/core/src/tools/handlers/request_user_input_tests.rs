@@ -34,6 +34,11 @@ async fn request_user_input_delivery_respects_availability(
     message: &str,
 ) {
     let (session, turn, events) = make_session_and_context_with_rx().await;
+    let mut turn = turn;
+    Arc::make_mut(&mut Arc::get_mut(&mut turn).unwrap().config)
+        .features
+        .enable(Feature::DefaultModeRequestUserInput)
+        .unwrap();
     let result = RequestUserInputHandler { available_modes, async_enabled }.handle(ToolInvocation {
         session,
         step_context: StepContext::for_test(Arc::clone(&turn)),
@@ -122,6 +127,103 @@ async fn multi_agent_v2_request_user_input_rejects_subagent_threads(delivery: &s
     );
 }
 
+#[test_case("wait", false, ModeKind::Default, false, true, false; "wait_default_off")]
+#[test_case("async", false, ModeKind::Default, false, true, false; "async_default_off")]
+#[test_case("async", true, ModeKind::Default, false, true, false; "legacy_default_off")]
+#[test_case("async", false, ModeKind::Plan, false, true, true; "captured_plan")]
+#[test_case("async", true, ModeKind::Plan, false, true, true; "legacy_captured_plan")]
+#[test_case("async", false, ModeKind::Default, true, true, true; "default_opt_in")]
+#[test_case("async", true, ModeKind::Default, true, true, true; "legacy_default_opt_in")]
+#[test_case("async", true, ModeKind::Plan, false, false, false; "legacy_model_gate")]
+#[tokio::test]
+async fn question_dispatch_uses_captured_mode_and_cannot_bypass_gates(
+    delivery: &str,
+    legacy: bool,
+    mode: ModeKind,
+    opt_in: bool,
+    model_capable: bool,
+    accepted: bool,
+) {
+    let (session, mut turn, events) = make_session_and_context_with_rx().await;
+    let config = Arc::make_mut(&mut Arc::get_mut(&mut turn).unwrap().config);
+    if opt_in {
+        config
+            .features
+            .enable(Feature::DefaultModeRequestUserInput)
+            .unwrap();
+    }
+    update_turn_settings_for_test(Arc::get_mut(&mut turn).unwrap(), |settings| {
+        update_selected_settings_for_test(settings, |selected| {
+            selected.collaboration_mode.mode = if mode == ModeKind::Plan {
+                ModeKind::Default
+            } else {
+                ModeKind::Plan
+            };
+        });
+    });
+    let mut step_context = StepContext::for_test(Arc::clone(&turn));
+    let settings = Arc::make_mut(&mut Arc::get_mut(&mut step_context).unwrap().settings);
+    update_selected_settings_for_test(settings, |selected| {
+        selected.collaboration_mode.mode = mode;
+    });
+    Arc::make_mut(&mut settings.model_info).experimental_supported_tools = if model_capable {
+        vec!["request_user_input_async".to_string()]
+    } else {
+        Vec::new()
+    };
+    let invocation = ToolInvocation {
+        session,
+        turn,
+        step_context,
+        cancellation_token: tokio_util::sync::CancellationToken::new(),
+        tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
+        call_id: "stale-call".to_string(),
+        tool_name: codex_tools::ToolName::plain(if legacy { "request_user_input_async" } else { REQUEST_USER_INPUT_TOOL_NAME }),
+        source: crate::tools::context::ToolCallSource::Direct,
+        payload: ToolPayload::Function {
+            arguments: if legacy {
+                json!({"questions": [{"title": "Proceed?"}]})
+            } else {
+                json!({"delivery": delivery, "questions": [{"id": "confirm", "header": "Confirm", "question": "Proceed?"}]})
+            }.to_string(),
+        },
+    };
+    let result = if legacy {
+        crate::tools::handlers::RequestUserInputAsyncHandler
+            .handle(invocation)
+            .await
+    } else {
+        // Stale handlers may still claim both delivery and Default are available.
+        RequestUserInputHandler {
+            available_modes: vec![ModeKind::Default, ModeKind::Plan],
+            async_enabled: true,
+        }
+        .handle(invocation)
+        .await
+    };
+    if accepted {
+        assert!(result.is_ok());
+        assert!(events.try_recv().is_ok());
+    } else {
+        let Err(error) = result else {
+            panic!("gated invocation must fail")
+        };
+        let message = if mode == ModeKind::Default && !opt_in {
+            "request_user_input is unavailable in Default mode"
+        } else {
+            "request_user_input async delivery is unavailable for this model"
+        };
+        assert_eq!(
+            error,
+            FunctionCallError::RespondToModel(message.to_string())
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "gated invocation must not reach the UI"
+        );
+    }
+}
+
 #[test_case(None, RenderedVerifiedAnswers { fragments: vec![], complete: true }; "empty")]
 #[test_case(Some(("other_question", "A".to_owned())), RenderedVerifiedAnswers { fragments: vec![], complete: true }; "unrequested question")]
 #[test_case(Some(("pick_one", " ".to_owned())), RenderedVerifiedAnswers { fragments: vec![], complete: true }; "blank answer")]
@@ -143,6 +245,11 @@ async fn request_user_input_sets_non_blocking_outside_plan_mode(
     expected: RenderedVerifiedAnswers,
 ) {
     let (session, turn, events) = make_session_and_context_with_rx().await;
+    let mut turn = turn;
+    Arc::make_mut(&mut Arc::get_mut(&mut turn).unwrap().config)
+        .features
+        .enable(Feature::DefaultModeRequestUserInput)
+        .unwrap();
     session
         .services
         .thread_extension_data
@@ -260,15 +367,12 @@ async fn request_user_input_sets_non_blocking_outside_plan_mode(
 }
 
 #[tokio::test]
-async fn request_user_input_sets_blocking_from_turn_mode() {
-    let (session, mut turn, events) = make_session_and_context_with_rx().await;
-    update_turn_settings_for_test(
-        Arc::get_mut(&mut turn).expect("turn context should be uniquely owned"),
-        |settings| {
-            update_selected_settings_for_test(settings, |selected| {
-                selected.collaboration_mode.mode = ModeKind::Plan;
-            });
-        },
+async fn request_user_input_sets_blocking_from_captured_step_mode() {
+    let (session, turn, events) = make_session_and_context_with_rx().await;
+    let mut step_context = StepContext::for_test(Arc::clone(&turn));
+    update_selected_settings_for_test(
+        Arc::make_mut(&mut Arc::get_mut(&mut step_context).unwrap().settings),
+        |selected| selected.collaboration_mode.mode = ModeKind::Plan,
     );
     *session.active_turn.lock().await = Some(ActiveTurn::default());
 
@@ -282,7 +386,7 @@ async fn request_user_input_sets_blocking_from_turn_mode() {
             }
             .handle(ToolInvocation {
                 session,
-                step_context: StepContext::for_test(Arc::clone(&turn)),
+                step_context,
                 turn,
                 cancellation_token: tokio_util::sync::CancellationToken::new(),
                 tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),

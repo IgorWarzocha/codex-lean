@@ -225,8 +225,12 @@ impl Session {
             ));
         }
         if !crate::guardian::is_basic_session_source(&turn_context.session_source) {
-            let async_user_input_available =
-                request_user_input_async_available(&turn_context.session_source, model_info);
+            let async_user_input_available = request_user_input_async_available(
+                &turn_context.session_source,
+                model_info,
+                &turn_context.config.features,
+                step_context.settings.effective_collaboration_mode().mode,
+            );
             let approval_request_channel = async_user_input_available.then_some(
                 if matches!(
                     step_context.tool_router.tool_mode(),

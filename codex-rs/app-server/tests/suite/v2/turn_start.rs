@@ -2570,12 +2570,11 @@ async fn turn_start_accepts_collaboration_mode_override_v2() -> Result<()> {
     Ok(())
 }
 
-#[test_case(true, "Default or Plan mode"; "default_enabled")]
-#[test_case(false, "Plan mode"; "default_disabled")]
+#[test_case(true; "default_enabled")]
+#[test_case(false; "default_disabled")]
 #[tokio::test]
 async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_description_v2(
     default_enabled: bool,
-    available_modes: &str,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
@@ -2651,12 +2650,19 @@ async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_de
         .as_array()
         .expect("tool schemas")
         .iter()
-        .find(|tool| tool["name"] == "request_user_input")
-        .expect("direct question tool");
-    assert_eq!(
-        tool["description"],
-        format!("Ask the user; wait for answers; {available_modes} only")
-    );
+        .find(|tool| tool["name"] == "request_user_input");
+    if default_enabled {
+        let tool = tool.expect("direct question tool");
+        assert_eq!(
+            tool["description"],
+            "Ask the user; wait for answers; Default or Plan mode only"
+        );
+    } else {
+        assert!(
+            tool.is_none(),
+            "Default mode must not expose the question tool without opt-in"
+        );
+    }
 
     Ok(())
 }

@@ -83,7 +83,18 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
         cwd,
         session_configured,
         ..
-    } = test_codex().with_direct_tools().build(&server).await?;
+    } = test_codex()
+        .with_direct_tools()
+        .with_config(move |config| {
+            if mode == ModeKind::Default {
+                config
+                    .features
+                    .enable(Feature::DefaultModeRequestUserInput)
+                    .expect("explicit question opt-in");
+            }
+        })
+        .build(&server)
+        .await?;
 
     let call_id = "user-input-call";
     let expected_is_blocking = mode == ModeKind::Plan;
@@ -390,10 +401,7 @@ where
     let req = second_mock.single_request();
     let (output, success) = call_output_content_and_success(&req, &call_id);
     assert_eq!(success, None);
-    assert_eq!(
-        output,
-        format!("request_user_input is unavailable in {mode_name} mode")
-    );
+    assert_eq!(output, "unsupported call: request_user_input".to_string());
 
     Ok(())
 }
@@ -412,6 +420,6 @@ async fn request_user_input_rejected_in_default_mode_when_disabled() -> anyhow::
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_user_input_round_trip_in_default_mode_by_default() -> anyhow::Result<()> {
+async fn request_user_input_round_trip_in_default_mode_when_enabled() -> anyhow::Result<()> {
     request_user_input_round_trip_for_mode(ModeKind::Default).await
 }

@@ -1738,7 +1738,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::DefaultModeRequestUserInput,
         key: "default_mode_request_user_input",
         stage: Stage::UnderDevelopment,
-        default_enabled: true,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::SendAsyncMessage,

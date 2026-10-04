@@ -12,6 +12,7 @@ impl ChatWidget {
             CliSetting::Retention,
             CliSetting::IdleRollover,
             CliSetting::Runtime,
+            CliSetting::QuestionsOutsidePlan,
             CliSetting::MultiAgent,
             CliSetting::WaitAgent,
         ]
@@ -183,26 +184,42 @@ mod tests {
 
     #[tokio::test]
     async fn settings_selection_saves_defaults_without_mutating_thread_or_emitting_ops() {
-        let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-        while events.try_recv().is_ok() {}
-        let before = chat.config.context_strategy;
-        let request_id = chat.open_cli_setting_loading(CliSetting::Context);
-        chat.on_cli_setting_discovered(
-            request_id,
-            CliSetting::Context,
-            "/selected/project".into(),
-            Ok("compaction".into()),
-        );
-        chat.bottom_pane
-            .handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
-        chat.bottom_pane
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let event = events.try_recv().unwrap();
-        assert!(
-            matches!(event, AppEvent::PersistCliSetting { setting: CliSetting::Context, choice, cwd } if choice == "notes" && cwd == "/selected/project")
-        );
-        assert_eq!(chat.config.context_strategy, before);
-        assert!(ops.try_recv().is_err());
+        for (setting, configured, expected) in [
+            (CliSetting::Context, "compaction", "notes"),
+            (CliSetting::QuestionsOutsidePlan, "off", "on"),
+        ] {
+            let (mut chat, _sender, mut events, mut ops) =
+                make_chatwidget_manual_with_sender().await;
+            while events.try_recv().is_ok() {}
+            let before = chat.config.context_strategy;
+            let questions_before = chat
+                .config
+                .features
+                .enabled(Feature::DefaultModeRequestUserInput);
+            let request_id = chat.open_cli_setting_loading(setting);
+            chat.on_cli_setting_discovered(
+                request_id,
+                setting,
+                "/selected/project".into(),
+                Ok(configured.into()),
+            );
+            chat.bottom_pane
+                .handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+            chat.bottom_pane
+                .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            let event = events.try_recv().unwrap();
+            assert!(
+                matches!(event, AppEvent::PersistCliSetting { setting: selected, choice, cwd } if selected == setting && choice == expected && cwd == "/selected/project")
+            );
+            assert_eq!(chat.config.context_strategy, before);
+            assert_eq!(
+                chat.config
+                    .features
+                    .enabled(Feature::DefaultModeRequestUserInput),
+                questions_before
+            );
+            assert!(ops.try_recv().is_err());
+        }
     }
 
     #[tokio::test]

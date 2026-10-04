@@ -71,11 +71,16 @@ The agent asks through `tools.request_user_input` inside `exec`, without separat
 top-level question tools. `delivery: "wait"` is the default and returns an answer
 object after the user responds. `delivery: "async"` returns `{ accepted: true }`
 immediately so other work can continue. Async replies arrive as user messages.
-Available delivery modes follow the model and collaboration-mode settings.
+The tool is Plan-only by default. Enable **Questions outside Plan mode** in
+`/settings` to allow either delivery mode elsewhere. Async delivery also requires
+model support.
 
 Both modes use the native CLI and desktop question interfaces. Questions can
 offer choices or omit them for free-text answers. Notebook cancellation also
 cancels a pending wait.
+
+Unanswered async questions remain answerable in the CLI after a successful turn.
+The desktop app currently closes its question editor when the turn ends.
 
 ## Remote notes and history
 

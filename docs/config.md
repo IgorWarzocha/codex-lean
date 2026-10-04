@@ -8,7 +8,7 @@ For a full configuration reference, see [this documentation](https://developers.
 
 ## CLI settings
 
-Use `/settings` in the TUI for context management, Code Mode, subagent tools and
+Use `/settings` in the TUI for context management, Code Mode, questions, subagent tools and
 experimental features. `/voice settings` also includes voice continuity policies.
 Pickers show configured defaults for the current project, not the running thread's
 effective state. Saves report rejected writes, overrides and failed readback.
@@ -33,6 +33,13 @@ Deno. Selecting it never grants access. `multi-agent off` disables both tool
 generations. `subagent-wait` independently controls the V2 wait tool, which is off
 by default. It is not required for automatic child-result delivery or resumption
 of an idle parent. Stop and session shutdown prevent that automatic resumption.
+
+The question tool is available only in Plan mode by default. To allow waiting
+and asynchronous questions outside Plan mode, turn on **Questions outside Plan
+mode** in `/settings`, or run `codex settings set questions-outside-plan on`.
+This writes `features.default_mode_request_user_input = true` for new threads.
+Turn it off to restore Plan-only availability. Async delivery still requires
+model support.
 
 `/experimental` includes Beta features and selected UnderDevelopment features
 with public metadata from the feature registry. Internal, removed, deprecated

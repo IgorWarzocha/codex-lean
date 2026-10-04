@@ -53,6 +53,7 @@ const result = await tools.request_user_input({questions: [{id: "deadline", head
 text(result.answers.deadline.answers[0]);"#,
         PermissionProfile::Disabled,
         move |config| {
+            config.features.enable(Feature::DefaultModeRequestUserInput).expect("explicit question opt-in");
             config.code_mode.runtime = runtime;
             config.code_mode.disable_in_process_fallback = false;
             config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
@@ -106,6 +107,7 @@ async fn notebook_request_user_input_wait_is_interruptible() -> Result<()> {
         r#"await tools.request_user_input({questions: [{id: "approval", header: "Approval", question: "Proceed?"}]}); text('SHOULD_NOT_RESUME');"#,
         PermissionProfile::Disabled,
         |config| {
+            config.features.enable(Feature::DefaultModeRequestUserInput).expect("explicit question opt-in");
             config.code_mode.runtime = CodeModeRuntime::Notebook;
             config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
         },

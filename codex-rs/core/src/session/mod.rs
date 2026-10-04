@@ -3892,6 +3892,7 @@ impl Session {
                 self.as_ref(),
                 turn_context.as_ref(),
                 &settings.model_info,
+                settings.effective_collaboration_mode().mode,
                 &environments,
                 &mcp,
                 &extension_data,

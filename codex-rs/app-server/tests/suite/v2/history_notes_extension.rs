@@ -11,6 +11,7 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
+use codex_features::Feature;
 use core_test_support::load_default_config_for_test;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
@@ -461,6 +462,7 @@ async fn history_notes_and_async_message_emit_control_tool_analytics() -> Result
         // This test sends direct function calls and verifies their individual
         // item IDs and exact control-tool counts. Notebook coverage lives above.
         .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .enable_feature(Feature::DefaultModeRequestUserInput)
         .write(codex_home.path())?;
     mount_analytics_capture(&backend, codex_home.path()).await?;
 

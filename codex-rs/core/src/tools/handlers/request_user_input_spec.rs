@@ -1,3 +1,4 @@
+use codex_features::Features;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::SessionSource;
@@ -13,8 +14,11 @@ pub const REQUEST_USER_INPUT_TOOL_NAME: &str = "request_user_input";
 pub(crate) fn request_user_input_async_available(
     source: &SessionSource,
     model: &ModelInfo,
+    features: &Features,
+    mode: ModeKind,
 ) -> bool {
     !source.is_non_root_agent()
+        && request_user_input_mode_available(features, mode)
         && model.experimental_supported_tools.iter().any(|tool| {
             // Existing catalogs still use both names for the async question capability.
             matches!(
@@ -22,6 +26,10 @@ pub(crate) fn request_user_input_async_available(
                 "request_user_input_async" | "send_user_message_async"
             )
         })
+}
+
+pub(crate) fn request_user_input_mode_available(features: &Features, mode: ModeKind) -> bool {
+    codex_tools::request_user_input_available_modes(features).contains(&mode)
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
@@ -161,9 +169,9 @@ pub fn request_user_input_tool_description(
 ) -> String {
     let allowed_modes = format_allowed_modes(available_modes);
     if async_enabled && available_modes.is_empty() {
-        "Ask the user; wait unavailable; async in any mode".to_string()
+        "Ask the user asynchronously; wait unavailable".to_string()
     } else if async_enabled {
-        format!("Ask the user; wait in {allowed_modes}; async in any mode")
+        format!("Ask the user; wait or async; {allowed_modes} only")
     } else {
         format!("Ask the user; wait for answers; {allowed_modes} only")
     }

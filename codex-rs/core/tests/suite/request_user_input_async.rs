@@ -2,6 +2,9 @@ use anyhow::Result;
 use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
 use codex_features::Feature;
+use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::Settings;
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageDelivery;
 use codex_protocol::items::AgentMessageItem;
@@ -16,6 +19,7 @@ use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -34,14 +38,18 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use test_case::test_case;
 
-#[test_case(SessionSource::Exec, None, false; "root_without_tool")]
-#[test_case(SessionSource::Exec, Some("send_user_message_async"), true; "root_with_legacy_catalog_name")]
-#[test_case(SessionSource::Exec, Some("request_user_input_async"), true; "root_with_current_catalog_name")]
-#[test_case(SessionSource::SubAgent(SubAgentSource::Other("test".to_string())), Some("request_user_input_async"), false; "subagent")]
+#[test_case(SessionSource::Exec, None, ModeKind::Plan, false, false; "plan_without_tool")]
+#[test_case(SessionSource::Exec, Some("send_user_message_async"), ModeKind::Plan, false, true; "plan_with_legacy_catalog_name")]
+#[test_case(SessionSource::Exec, Some("request_user_input_async"), ModeKind::Plan, false, true; "plan_with_current_catalog_name")]
+#[test_case(SessionSource::Exec, Some("request_user_input_async"), ModeKind::Default, false, false; "default_without_opt_in")]
+#[test_case(SessionSource::Exec, Some("request_user_input_async"), ModeKind::Default, true, true; "default_with_opt_in")]
+#[test_case(SessionSource::SubAgent(SubAgentSource::Other("test".to_string())), Some("request_user_input_async"), ModeKind::Plan, false, false; "subagent")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persistent_async_message_guidance_follows_tool_availability(
     session_source: SessionSource,
     catalog_tool: Option<&'static str>,
+    mode: ModeKind,
+    opt_in: bool,
     expect_tool_guidance: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -84,8 +92,14 @@ async fn persistent_async_message_guidance_follows_tool_availability(
                 ..Default::default()
             });
         })
-        .with_config(|config| {
+        .with_config(move |config| {
             config.model_reasoning_effort = Some(ReasoningEffort::Persistent);
+            if opt_in {
+                config
+                    .features
+                    .enable(Feature::DefaultModeRequestUserInput)
+                    .expect("explicit question opt-in");
+            }
         })
         .build_with_auto_env(&server)
         .await?;
@@ -98,10 +112,23 @@ async fn persistent_async_message_guidance_follows_tool_availability(
         .await?
         .thread;
     thread
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Report progress.".to_string(),
-            text_elements: Vec::new(),
-        }]))
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Report progress.".to_string(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                collaboration_mode: Some(CollaborationMode {
+                    mode,
+                    settings: Settings {
+                        model: "gpt-5.2".to_string(),
+                        reasoning_effort: Some(ReasoningEffort::Persistent),
+                        developer_instructions: None,
+                    },
+                }),
+                ..Default::default()
+            }),
+        )
         .await?;
     wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
@@ -332,7 +359,7 @@ async fn freeform_async_message_emits_an_item_without_ending_the_turn(
                 && tool["name"] != "request_user_input")
     );
     assert!(
-        tools
+        !tools
             .iter()
             .find(|tool| tool["name"] == "exec")
             .expect("exec")["description"]
@@ -449,6 +476,10 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
         })
         .with_config(move |config| {
             config.experimental_request_user_input_enabled = wait_enabled;
+            config
+                .features
+                .enable(Feature::DefaultModeRequestUserInput)
+                .expect("explicit question opt-in");
             if let Some(runtime) = runtime {
                 config
                     .features
@@ -662,6 +693,12 @@ async fn invalid_async_questions_do_not_emit_an_item(
             model
                 .experimental_supported_tools
                 .push("request_user_input_async".to_string());
+        })
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::DefaultModeRequestUserInput)
+                .expect("explicit question opt-in");
         })
         .build_with_auto_env(&server)
         .await?;
