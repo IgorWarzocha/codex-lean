@@ -63,7 +63,9 @@ On every app update, the hook fetches the latest commit from [`IgorWarzocha/code
 
 **Enabling this hook trusts future code on that Git branch to run as root.** HTTPS verifies the server, not the safety of each commit. The installed launcher and Git-fetching bootstrap stay fixed until you rerun the installer. Patcher updates on the branch take effect automatically.
 
-The hook runs after any package installs or upgrades `usr/lib/chatgpt/resources/app.asar`, including `chatgpt-bin` updates through pacman, yay, and Omarchy. A compatible archive is staged on the same filesystem and atomically replaced with its original owner and mode. No original archive backup is kept. The unpacked directory stays untouched. The hook does not stop or restart the app. Restart it after an update.
+The hook runs after any package installs or upgrades `usr/lib/chatgpt/resources/app.asar`, including `chatgpt-bin` updates through pacman, yay, and Omarchy. It gracefully closes the selected user's ChatGPT desktop executable before fetching Git. Shutdown interrupts any active desktop conversation. Only processes running `/usr/lib/chatgpt/ChatGPT` are targeted, including the deleted executable left running after a package upgrade. CLI agents and `cua_node` workers are not signalled. The hook waits up to ten seconds for Electron to exit. If shutdown fails or the app restarts during shutdown, it warns and refuses to patch rather than force-killing the app.
+
+A compatible archive is staged on the same filesystem and atomically replaced with its original owner and mode. No original archive backup is kept. The unpacked directory stays untouched. The app remains closed even if Git or compatibility checks fail. Reopen it after the update.
 
 If native instruction code is incompatible, the updated archive stays unchanged and Codex uses its native personality. If Git cannot be fetched or the fetched sources are invalid, the hook leaves the archive unchanged rather than silently using an old patcher. The hook prints a warning, logs it under `codex-desktop-personality`, and sends a persistent desktop notification when your session is available. Operational failures are also reported. All paths through the launcher return success so the personality hook does not turn the app update into a failed update. A two-minute timeout prevents a stuck updater from holding up updates indefinitely. When no desktop session is available, the printed warning and journal remain available:
 
@@ -71,7 +73,7 @@ If native instruction code is incompatible, the updated archive stays unchanged 
 journalctl -t codex-desktop-personality
 ```
 
-After adjusting compatibility checks, commit and push the patcher to that branch. To fetch it and retry on an unpatched archive, quit the app and run:
+After adjusting compatibility checks, commit and push the patcher to that branch. To close the app, fetch the patcher, and retry on an unpatched archive, run:
 
 ```sh
 sudo /opt/codex-desktop-personality/pacman-hook.sh \

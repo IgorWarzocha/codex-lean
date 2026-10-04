@@ -2,16 +2,94 @@
 """Reapply desktop personality after a package update, without failing the update."""
 
 import argparse
+import contextlib
 import os
 import pwd
+import selectors
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from asar import Asar, UnsupportedBundle
 from patch import replacements, validate_prompt_path, verify_bundle
+
+
+APP_EXECUTABLE = Path("/usr/lib/chatgpt/ChatGPT")
+PROCESS_DIRECTORY = Path("/proc")
+
+
+@dataclass(frozen=True)
+class DesktopProcess:
+    pid: int
+    main: bool
+
+
+def app_process(directory: Path, uid: int) -> DesktopProcess | None:
+    try:
+        if directory.stat().st_uid != uid:
+            return None
+        executable = os.readlink(directory / "exe").removesuffix(" (deleted)")
+        if executable != str(APP_EXECUTABLE):
+            return None
+        arguments = (directory / "cmdline").read_bytes().split(b"\0")
+        main = not any(argument.startswith(b"--type=") for argument in arguments)
+        return DesktopProcess(int(directory.name), main)
+    except (FileNotFoundError, ProcessLookupError):
+        # Processes may exit while procfs is read. Other failures are visible.
+        return None
+
+
+def app_processes(uid: int) -> list[DesktopProcess]:
+    return [
+        process
+        for directory in PROCESS_DIRECTORY.iterdir()
+        if directory.name.isdecimal()
+        if (process := app_process(directory, uid)) is not None
+    ]
+
+
+def close_app(user: str, *, timeout: float = 10) -> None:
+    uid = pwd.getpwnam(user).pw_uid
+    targets = app_processes(uid)
+    if not targets:
+        return
+    # Stable pidfds avoid signalling a recycled PID. Signal only main processes,
+    # then wait for their Electron children. Never kill cua_node or CLI workers.
+    with contextlib.ExitStack() as cleanup, selectors.DefaultSelector() as selector:
+        for process in targets:
+            try:
+                descriptor = os.pidfd_open(process.pid)
+                cleanup.callback(os.close, descriptor)
+                # Recheck identity after acquiring a stable handle.
+                if app_process(PROCESS_DIRECTORY / str(process.pid), uid) != process:
+                    continue
+                selector.register(descriptor, selectors.EVENT_READ)
+                if process.main:
+                    signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+            except ProcessLookupError:
+                continue
+        deadline = time.monotonic() + timeout
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    "ChatGPT desktop did not close gracefully; refusing to patch"
+                )
+            for key, _ in selector.select(remaining):
+                selector.unregister(key.fd)
+        if app_processes(uid):
+            raise RuntimeError(
+                "ChatGPT desktop restarted during shutdown; refusing to patch"
+            )
+    print(
+        "Codex personality: closed ChatGPT desktop. Reopen it after the update.",
+        flush=True,
+    )
 
 
 def validate_personality(user: str, personality: Path) -> Path:

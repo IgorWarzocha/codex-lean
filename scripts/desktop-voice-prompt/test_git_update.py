@@ -36,6 +36,9 @@ class GitUpdateTests(unittest.TestCase):
         self.commit_runner("first")
         # Local Git fixtures test owned extraction and execution, not HTTPS compatibility.
         self.original_git = git_update.git
+        close = mock_patch.object(git_update, "close_app")
+        self.close_app = close.start()
+        self.addCleanup(close.stop)
 
         def local_git(arguments, directory, environment):
             return self.original_git(
@@ -130,6 +133,20 @@ class GitUpdateTests(unittest.TestCase):
         self.assertEqual(
             {path.name for path in self.library.iterdir()}, {".update.lock"}
         )
+
+    def test_shutdown_failure_warns_and_prevents_fetch_or_archive_changes(self):
+        self.close_app.side_effect = TimeoutError("app refused to close")
+        with (
+            mock_patch.object(git_update.os, "geteuid", return_value=0),
+            mock_patch.object(git_update, "trusted_directory"),
+            mock_patch.object(git_update, "fetch_patcher") as fetch,
+            mock_patch.object(git_update, "report") as report,
+        ):
+            self.assertEqual(self.invoke(), 0)
+        fetch.assert_not_called()
+        self.assertEqual(self.archive.read_bytes(), b"original")
+        self.assertIn("app refused to close", report.call_args.args[1])
+        self.assertTrue(report.call_args.kwargs["warning"])
 
     def test_missing_and_symlinked_git_sources_are_rejected_before_execution(self):
         target = self.sources / "regions.py"

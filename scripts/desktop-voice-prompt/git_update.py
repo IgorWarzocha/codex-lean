@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from pacman_hook import report, validate_personality
+from pacman_hook import close_app, report, validate_personality
 
 
 LIBRARY = Path("/opt/codex-desktop-personality")
@@ -130,6 +130,7 @@ def update(user: str, personality: Path, archive: Path) -> None:
     )
     with os.fdopen(descriptor, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        close_app(user)
         with tempfile.TemporaryDirectory(
             prefix=".git-update-", dir=LIBRARY
         ) as temporary:
