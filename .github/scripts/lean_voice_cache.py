@@ -155,16 +155,21 @@ def validate_payload(helper: Path, runtime: Path, provenance: dict, target: str,
         raise ValueError("voice artifact has unlisted runtime files")
 
 
-def seal_artifact(directory: Path, staged: Path, target: str, commit: str) -> None:
+def seal_artifact(directory: Path, staged: Path, target: str, commit: str, *,
+                  expected_input_fingerprint: str) -> None:
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("voice source commit must be a full Git SHA")
     suffix = ".exe" if target.endswith("-windows-msvc") else ""
     source = source_fingerprint(ROOT, target)
     image = image_identity()
     tools = tool_identity()
+    fingerprint = input_fingerprint(source, image, tools)
+    # Seal the inputs used for the pre-build cache key, not a mutated checkout.
+    if fingerprint != expected_input_fingerprint:
+        raise ValueError("voice inputs changed after cache identity was calculated")
     provenance = {"schemaVersion": SCHEMA, "target": target, "sourceCommit": commit,
                   "sourceFingerprint": source, "runnerImage": image,
-                  "toolVersions": tools, "inputFingerprint": input_fingerprint(source, image, tools),
+                  "toolVersions": tools, "inputFingerprint": fingerprint,
                   "archiveSha256": digest(directory / f"lean-voice-{target}.tar.gz"),
                   "helperSha256": digest(staged / f"codex-voice-host{suffix}"),
                   "runtimeSha256": inventory(staged / "runtime")}

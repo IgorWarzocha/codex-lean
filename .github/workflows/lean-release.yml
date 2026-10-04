@@ -156,7 +156,8 @@ jobs:
         if: steps.voice-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          args=(--jobs="$BAZEL_BUILD_JOBS" --local_resources="cpu=$BAZEL_BUILD_JOBS" --disk_cache= --remote_cache= --remote_executor=)
+          # MODULE.bazel.lock is a sealed input, never a build-generated update.
+          args=(--lockfile_mode=error --jobs="$BAZEL_BUILD_JOBS" --local_resources="cpu=$BAZEL_BUILD_JOBS" --disk_cache= --remote_cache= --remote_executor=)
           if [[ "$TARGET" == *-windows-msvc ]]; then
             # Git Bash must not rewrite Bazel labels into Windows filesystem paths.
             export MSYS2_ARG_CONV_EXCL='*'
@@ -181,6 +182,8 @@ jobs:
             //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
       - name: Stage and seal the matching runtime
         if: steps.voice-cache.outputs.cache-hit != 'true'
+        env:
+          EXPECTED_VOICE_INPUT_FINGERPRINT: ${{ steps.voice-identity.outputs.fingerprint }}
         run: |
           set -euo pipefail
           runtime="bazel-bin/third_party/voice/native_runtime_$VOICE_PREFIX"
@@ -206,7 +209,8 @@ jobs:
           python third_party/voice/release_runtime.py seal --target "$TARGET" --output "$output/runtime"
           mkdir lean-voice-cache
           tar -C "$output" -czf "lean-voice-cache/lean-voice-$TARGET.tar.gz" runtime "codex-voice-host$suffix"
-          python .github/scripts/lean_voice.py seal --staged "$output"
+          python .github/scripts/lean_voice.py seal --staged "$output" \
+            --expected-input-fingerprint "$EXPECTED_VOICE_INPUT_FINGERPRINT"
       - name: Verify native provenance, bytes, build stamp and private runtime initialization
         run: python .github/scripts/lean_voice.py verify --smoke
       - name: Save immutable voice bytes only after native validation

@@ -214,6 +214,7 @@ def main() -> None:
     parser.add_argument("--target", default=os.environ.get("VOICE_TARGET") or os.environ.get("TARGET"))
     parser.add_argument("--directory", type=Path, default=REPO_ROOT / "lean-voice-cache")
     parser.add_argument("--staged", type=Path)
+    parser.add_argument("--expected-input-fingerprint")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--export-env", action="store_true")
     args = parser.parse_args()
@@ -221,10 +222,14 @@ def main() -> None:
         fingerprint = cache.input_fingerprint(cache.source_fingerprint(REPO_ROOT, args.target),
                                               cache.image_identity(), cache.tool_identity())
         print(f"key=lean-voice-v{cache.SCHEMA}-{args.target}-{fingerprint}")
+        print(f"fingerprint={fingerprint}")
     elif args.command == "seal":
         if args.staged is None:
             parser.error("seal requires --staged")
-        cache.seal_artifact(args.directory, args.staged, args.target, os.environ["STABLE_GIT_COMMIT"])
+        if args.expected_input_fingerprint is None:
+            parser.error("seal requires --expected-input-fingerprint from pre-build identity")
+        cache.seal_artifact(args.directory, args.staged, args.target, os.environ["STABLE_GIT_COMMIT"],
+                            expected_input_fingerprint=args.expected_input_fingerprint)
     else:
         with tempfile.TemporaryDirectory(prefix="lean-voice-verify-") as temporary:
             staged = Path(temporary) / "payload"

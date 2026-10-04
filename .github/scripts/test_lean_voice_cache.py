@@ -1,11 +1,13 @@
 """Offline input invalidation, immutable artifact integrity and original provenance."""
 
+import io
 import json
 import os
 import shutil
 import tarfile
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,34 +21,43 @@ IMAGE = {"ImageOS": "ubuntu24", "ImageVersion": "20261001.1"}
 TOOLS = {"python": "3.12.9"}
 
 
-class FingerprintTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        for name in cache.FILES:
-            self.write(name, "pinned input\n")
-        for name in cache.TREES:
-            self.write(name + "/input", "recipe\n")
-        self.write("codex-rs/Cargo.toml", '''[workspace]
+def make_checkout(root: Path) -> None:
+    def write(name, content):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    for name in cache.FILES:
+        write(name, "pinned input\n")
+    for name in cache.TREES:
+        write(name + "/input", "recipe\n")
+    write("codex-rs/Cargo.toml", '''[workspace]
 members = ["voice-host", "shared", "cli"]
 [workspace.package]
 version = "1.0.0-lean.1"
 [workspace.dependencies]
 protocol = { path = "shared" }
 ''')
-        self.write("codex-rs/voice-host/Cargo.toml", '''[package]
+    write("codex-rs/voice-host/Cargo.toml", '''[package]
 name = "voice"
 [dependencies]
 protocol = { workspace = true }
 [target.'cfg(windows)'.build-dependencies]
 windows = { path = "../windows" }
 ''')
-        self.write("codex-rs/shared/Cargo.toml", '[package]\nname = "protocol"\n')
-        self.write("codex-rs/windows/Cargo.toml", '[package]\nname = "windows"\n')
-        self.write("codex-rs/cli/Cargo.toml", '[package]\nname = "cli"\n')
-        self.write("codex-rs/shared/src/lib.rs", "shared protocol\n")
-        self.write("codex-rs/voice-host/src/main.rs", "voice helper\n")
+    write("codex-rs/shared/Cargo.toml", '[package]\nname = "protocol"\n')
+    write("codex-rs/windows/Cargo.toml", '[package]\nname = "windows"\n')
+    write("codex-rs/cli/Cargo.toml", '[package]\nname = "cli"\n')
+    write("codex-rs/shared/src/lib.rs", "shared protocol\n")
+    write("codex-rs/voice-host/src/main.rs", "voice helper\n")
+
+
+class FingerprintTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        make_checkout(self.root)
         self.original = cache.source_fingerprint(self.root, TARGET)
 
     def write(self, name, content):
@@ -155,7 +166,10 @@ class ArtifactTests(unittest.TestCase):
         self.proof_path = self.directory / f"lean-voice-{TARGET}.provenance.json"
         self.write_archive()
         with patch.dict(os.environ, IMAGE):
-            cache.seal_artifact(self.directory, self.staged, TARGET, COMMIT)
+            fingerprint = cache.input_fingerprint(cache.source_fingerprint(cache.ROOT, TARGET),
+                                                  IMAGE, cache.tool_identity())
+            cache.seal_artifact(self.directory, self.staged, TARGET, COMMIT,
+                                expected_input_fingerprint=fingerprint)
         self.proof = json.loads(self.proof_path.read_text())
 
     def write_archive(self):
@@ -176,6 +190,55 @@ class ArtifactTests(unittest.TestCase):
         with patch.dict(os.environ, {**IMAGE, "ImageVersion": "different"}):
             with self.assertRaisesRegex(ValueError, "runner image"):
                 voice.verify_artifact(self.directory, TARGET, self.root / "different-image")
+
+    def test_producer_seals_prebuild_inputs_for_a_fresh_consumer(self):
+        producer, consumer = self.root / "producer", self.root / "consumer"
+        make_checkout(producer)
+        make_checkout(consumer)
+        output = io.StringIO()
+        with patch.object(voice, "REPO_ROOT", producer), patch.dict(os.environ, IMAGE), \
+                patch("sys.argv", ["voice", "identity", "--target", TARGET]), redirect_stdout(output):
+            voice.main()
+        identity = dict(line.split("=", 1) for line in output.getvalue().splitlines())
+        fingerprint = identity["fingerprint"]
+        self.assertEqual(identity["key"], f"lean-voice-v{cache.SCHEMA}-{TARGET}-{fingerprint}")
+        with patch.object(cache, "ROOT", producer), \
+                patch.dict(os.environ, {**IMAGE, "STABLE_GIT_COMMIT": COMMIT}), \
+                patch("sys.argv", ["voice", "seal", "--target", TARGET,
+                                   "--directory", str(self.directory), "--staged", str(self.staged),
+                                   "--expected-input-fingerprint", fingerprint]):
+            voice.main()
+        proof = voice.verify_artifact(self.directory, TARGET, self.root / "fresh-consumer-payload",
+                                      root=consumer, current_image=False)
+        self.assertEqual(proof["inputFingerprint"], fingerprint)
+        self.assertEqual(proof["sourceCommit"], COMMIT)
+        # Real Bazel 9 drift came from adding rules_rs crate metadata facts.
+        # Also cover generated source files and non-source identity drift.
+        mutations = ("MODULE.bazel.lock", "third_party/voice/generated",
+                     "codex-rs/shared/src/lib.rs")
+        for name in mutations:
+            path = producer / name
+            previous = path.read_bytes() if path.exists() else None
+            with self.subTest(name=name), patch.object(cache, "ROOT", producer), \
+                    patch.dict(os.environ, IMAGE):
+                self.proof_path.unlink()
+                path.write_bytes((previous or b"") + b"build-time mutation")
+                with self.assertRaisesRegex(ValueError, "inputs changed"):
+                    cache.seal_artifact(self.directory, self.staged, TARGET, COMMIT,
+                                        expected_input_fingerprint=fingerprint)
+                self.assertFalse(self.proof_path.exists())
+                if previous is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(previous)
+            self.proof_path.write_text(json.dumps(proof))
+        for image, tools in (({**IMAGE, "ImageVersion": "changed"}, cache.tool_identity()),
+                             (IMAGE, {"python": "0.0.0"})):
+            with self.subTest(image=image, tools=tools), patch.object(cache, "ROOT", producer), \
+                    patch.dict(os.environ, image), patch.object(cache, "tool_identity", return_value=tools):
+                with self.assertRaisesRegex(ValueError, "inputs changed"):
+                    cache.seal_artifact(self.directory, self.staged, TARGET, COMMIT,
+                                        expected_input_fingerprint=fingerprint)
 
     def test_archive_digest_is_checked_before_extraction(self):
         self.archive.write_bytes(self.archive.read_bytes() + b"tamper")
