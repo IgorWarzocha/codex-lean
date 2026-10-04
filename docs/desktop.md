@@ -60,6 +60,20 @@ To bring additional skills across, [copy selected packages into Lean](skills.md#
 
 Notebook requires full access. For a trusted execution host, set `sandbox_mode = "danger-full-access"` in `~/.codex-lean/config.toml` and select compatible permissions in the GUI. Do not overwrite existing configuration or silently expand permissions. To retain sandboxing, run `codex-lean settings set code-mode v8` instead. API-key users also need `codex-lean settings set context compaction`.
 
+## Share the backend with the CLI
+
+Before connecting Desktop and the CLI to the same backend, explicitly enable model discovery in Lean's home on the machine running the backend:
+
+```sh
+codex-lean features enable api_key_model_discovery
+```
+
+The CLI defaults this feature to enabled. Desktop can send runtime feature defaults that disable it on the shared server. An explicit setting in `~/.codex-lean/config.toml` takes precedence over those runtime defaults, keeping the clients compatible. Despite the feature's name, this setting does not require API-key authentication or replace ChatGPT sign-in.
+
+If the CLI reports `This session requires api_key_model_discovery to be enabled`, run the command above and retry. Repeated restarts alone do not fix the conflict because Desktop can send the same runtime default again. `--no-daemon` bypasses the shared server for one CLI session, but does not resolve the shared configuration.
+
+If the recovery menu also says `This server is not managed by Codex`, Desktop has launched a standalone app-server on the shared socket. The CLI cannot restart that process through daemon management. That is a separate ownership issue, not a failed package update. For a managed server, close the clients using that connection, stop the identified standalone backend after checking for active work, and start `codex-lean app-server daemon start` before reconnecting Desktop.
+
 ## Run the GUI locally
 
 Quit the existing GUI instance first. Otherwise Electron can hand the launch to the old process with its old backend.
