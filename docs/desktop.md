@@ -4,6 +4,16 @@ Use Lean as the app-server behind ChatGPT Desktop while keeping stock Codex inst
 
 This guide was verified with Codex Lean `0.160.0-lean.2` and Linux ChatGPT Desktop `26.930.31730`, including two remote clients connected to one Linux server. Desktop environment overrides are implementation-specific, not a stable public integration contract. Recheck them when the desktop app changes. Do not patch its bundle to force compatibility.
 
+## Copy your existing Codex home
+
+To keep your saved conversations and familiar setup, copy your existing Codex home, normally `~/.codex`, into a new `~/.codex-lean` directory. Close Codex and stop its backend first so databases and session files are consistent. Copy the whole home, including hidden files, rather than selecting only settings and skills. Preserve permissions. Do not overwrite an existing Lean home, move the source, or link the two homes together.
+
+Check absolute paths in the copy before using it. Configuration can point to an external database directory or back into the stock home. The copied state database can also contain absolute `threads.rollout_path` entries pointing to original conversation files. Codex accepts an existing indexed path, even outside its current home. Repoint entries for copied conversations to their matching files under the Lean home, changing only the copy. Do not blindly replace project paths or paths to intentionally shared resources. Verify that conversation paths resolve inside the Lean home before resuming those conversations.
+
+The copy carries saved conversations, history, instructions, settings, and home-local skills. Subsequent work in the two homes is separate. Skills already included in the copy need no second migration. Use the [skills guide](skills.md#copy-existing-skills-into-lean) to check discovery and shared-source conflicts.
+
+If you prefer a fresh start, skip the copy and create an empty Lean home below.
+
 ## Install on the machine that runs the work
 
 Download and [verify the complete package](install.md#verify-and-extract). Extract it into a new versioned directory, for example:
@@ -18,7 +28,7 @@ Download and [verify the complete package](install.md#verify-and-extract). Extra
 
 Keep the package intact. Do not overwrite the existing `codex` command, the GUI's bundled executable, or anything inside stock `~/.codex/packages`.
 
-For a first installation, create a stable link and private home:
+After copying your home, create a stable link and ensure the home is private. These commands also create an empty home if you chose a fresh start:
 
 ```sh
 mkdir -p "$HOME/.local/bin"
@@ -39,15 +49,14 @@ Ensure `~/.local/bin` is on your command path. Check both commands before contin
 ```sh
 codex --version
 codex-lean --version
-codex-lean login
 codex-lean login status
 ```
 
-Stock `codex` should still resolve to its original installation. Lean should report the release version. Sign in separately rather than copying or linking stock credentials. On a headless server, use `codex-lean login --device-auth` and complete the displayed browser flow. Sign in before starting the daemon. If it was already running, restart it afterward so it loads the new credentials.
+Stock `codex` should still resolve to its original installation. Lean should report the release version. If the copied authentication is unavailable or you chose a fresh home, run `codex-lean login`. On a headless server, use `codex-lean login --device-auth` and complete the displayed browser flow. Sign in before starting the daemon. If it was already running, restart it afterward so it loads the new credentials.
 
-Lean's home holds separate settings, threads, caches, and daemon sockets. Old stock conversations do not move into it. Start a new Lean thread for the first check.
+Lean's home holds its own settings, threads, caches, and daemon sockets. A copied home includes the old conversations. An empty home does not. Check copied conversation paths as described above, then start a new Lean thread for the tool check.
 
-To bring existing skills across, [copy selected packages into Lean](skills.md#copy-existing-skills-into-lean). Leave the originals untouched. Shared `~/.agents/skills` and repository skills remain discoverable, so check those sources before assuming the catalogs are completely separate.
+To bring additional skills across, [copy selected packages into Lean](skills.md#copy-existing-skills-into-lean). Leave the originals untouched. Shared `~/.agents/skills` and repository skills remain discoverable, so check those sources before assuming the catalogs are completely separate.
 
 Notebook requires full access. For a trusted execution host, set `sandbox_mode = "danger-full-access"` in `~/.codex-lean/config.toml` and select compatible permissions in the GUI. Do not overwrite existing configuration or silently expand permissions. To retain sandboxing, run `codex-lean settings set code-mode v8` instead. API-key users also need `codex-lean settings set context compaction`.
 

@@ -4,6 +4,8 @@ Codex discovers skills through its native configured sources. The `skills` tool 
 
 ## Copy existing skills into Lean
 
+If you [copied your whole Codex home](desktop.md#copy-your-existing-codex-home), its home-local skills are already in Lean. Skip copying those packages again and [verify discovery and shared sources](#check-shared-sources-and-verify). The steps below cover adding individual packages or populating a fresh Lean home.
+
 **Copy intact packages, do not move or rewrite them.** Keep the original skills and their configuration unchanged. Place independent copies under `~/.codex-lean/skills`, using the isolated home from the [desktop setup guide](desktop.md). Preserve every package's contents and internal directory layout. Do not symlink the skill trees together.
 
 Flat skill packages already work. Categorizing them is optional and changes only where the complete package lives, not its instructions or internal organization.

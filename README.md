@@ -34,11 +34,11 @@ OpenAI's installers, npm package, and Homebrew package install upstream Codex, n
 
 ## Bring your existing setup
 
-**We recommend a separate `~/.codex-lean` home, seeded with copies of your current Codex instructions, preferences, and skills.** Keep stock `~/.codex` untouched. Lean otherwise uses `~/.codex` too, so set `CODEX_HOME` on every Lean invocation, including login. The commands below use the separate home.
+**We recommend copying your existing `~/.codex` directory to a separate `~/.codex-lean` home.** This brings your saved conversations, history, instructions, settings, and skills with you while keeping the original setup untouched. Lean otherwise uses `~/.codex` too, so set `CODEX_HOME` on every Lean invocation. The commands below use the separate home.
 
-Copy your home-level `AGENTS.md` and any `codex_personality.md` you use. Review and transfer the settings you want from `config.toml`, checking absolute paths and permission choices rather than overwriting Lean's configuration. Copy selected skill packages intact into `~/.codex-lean/skills`, including their references, scripts, and assets. Do not move the originals or symlink the two homes together. Sign in separately instead of copying credentials.
+Close Codex and stop its backend before copying so the saved files and databases are consistent. Copy into a new destination, not over an existing Lean home. Do not move the original directory or symlink the two homes together. Review copied configuration and conversation-index paths so Lean uses the copies rather than files in the original home. See the [migration checks](docs/desktop.md#copy-your-existing-codex-home).
 
-**This carries over your setup, not a live conversation.** A fresh Lean home does not automatically inherit stock threads, history, or remembered context. Keep old conversations in stock Codex. For ongoing work, bring a written handoff into a new Lean thread with the goal, decisions, relevant paths, and next steps. Do not expect switching backends to resume the same working state.
+After the copy, stock Codex and Lean have independent histories. You can continue copied conversations in Lean. Choose an empty Lean home only if you want a fresh start.
 
 Skills have a few important quirks:
 
@@ -46,7 +46,7 @@ Skills have a few important quirks:
 - **A separate home is not complete skill isolation.** Shared `~/.agents/skills`, repository skills, and enabled plugins can still contribute skills. Check the catalog from your actual project. Disable unwanted duplicate source paths in Lean's configuration without changing the originals.
 - **Categories are folders, not namespaces.** Flat packages work. A category folder must not contain its own `SKILL.md` unless it is itself a skill. Repository skills appear under `session`, and moving a package into a category does not resolve duplicate skill names.
 
-Follow the [skill-copying and verification guide](docs/skills.md#copy-existing-skills-into-lean), then confirm a fresh Lean thread reads the intended copies. The [side-by-side setup](docs/install.md#run-alongside-upstream-codex) covers a dedicated launcher.
+Skills inside the copied home are already carried over. Use the [skill guide](docs/skills.md#copy-existing-skills-into-lean) to verify discovery, optionally organize categories, or bring in additional packages. The [side-by-side setup](docs/install.md#run-alongside-upstream-codex) covers a dedicated launcher.
 
 ## Start
 
@@ -81,7 +81,7 @@ The [desktop and server setup guide](docs/desktop.md) covers installation, sign-
 
 To have an agent do the setup, give it this task:
 
-> Follow `docs/desktop.md` to install Codex Lean alongside my existing Codex and configure ChatGPT Desktop to use it. Inspect the installed app's supported backend overrides and my shell startup files first. Preserve stock Codex and its data. Use a separate Lean home and sign-in. Copy my existing instructions, preferences, and selected intact skill packages into Lean, reviewing configuration paths and permissions. Follow `docs/skills.md` to verify discovery and shared-source conflicts without changing the originals. Explain what does not carry over, including old conversations and live working state. For a remote setup, configure the execution server and verify the connection from each client. Prove the GUI handshake reaches the Lean version and home, then run a small tool task. Report the changed paths and how to switch back. Do not patch the desktop bundle or expose an unauthenticated network listener.
+> Follow `docs/desktop.md` to install Codex Lean alongside my existing Codex and configure ChatGPT Desktop to use it. Inspect the installed app's supported backend overrides and my shell startup files first. Preserve stock Codex and its data. With Codex and its backend stopped, copy my existing Codex home into a separate Lean home, including saved conversations, history, instructions, settings, and intact skills. Do not overwrite an existing Lean home. Check copied configuration and conversation-index paths, permissions, and login status. Verify that copied conversations use files in the Lean home. Follow `docs/skills.md` to verify discovery and shared-source conflicts without changing the originals. For a remote setup, configure the execution server and verify the connection from each client. Prove the GUI handshake reaches the Lean version and home, then run a small tool task. Report the changed paths and how to switch back. Do not patch the desktop bundle or expose an unauthenticated network listener.
 
 ## Updates and source builds
 
