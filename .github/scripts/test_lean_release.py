@@ -193,7 +193,9 @@ class ReleasePackageTest(unittest.TestCase):
         voice.assemble(package, binary, native_target, COMMIT, output, runtime=runtime,
                        release_version=VERSION, voice_build_commit=voice_commit)
         proof = {
-            "schemaVersion": 1, "target": native_target, "sourceCommit": voice_commit,
+            "schemaVersion": cache.SCHEMA, "target": native_target, "sourceCommit": voice_commit,
+            "compatibilityPolicy": cache.COMPATIBILITY_POLICY,
+            "workspaceVersion": cache.workspace_version(cache.ROOT),
             "sourceFingerprint": cache.source_fingerprint(cache.ROOT, native_target),
             "runnerImage": {"ImageOS": "fixture", "ImageVersion": "1"},
             "toolVersions": cache.tool_identity(),

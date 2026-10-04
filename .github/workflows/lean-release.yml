@@ -104,8 +104,29 @@ jobs:
           path: lean-voice-cache
           key: ${{ steps.voice-identity.outputs.key }}
           # No restore-keys. Incompatible native bytes are never a fallback.
+      - name: Checkout original published voice sources for verified cache migration
+        if: steps.voice-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: 19e5ad36f344597a945f43d4e27cb33da0163682
+          path: lean-voice-baseline
+          persist-credentials: false
+      - name: Calculate compatible original native voice cache key
+        if: steps.voice-cache.outputs.cache-hit != 'true'
+        id: voice-legacy-identity
+        run: python .github/scripts/lean_voice.py legacy-identity --legacy-root lean-voice-baseline >> "$GITHUB_OUTPUT"
+      - name: Restore the compatible original sealed native voice artifact
+        if: steps.voice-cache.outputs.cache-hit != 'true' && steps.voice-legacy-identity.outputs.key != ''
+        id: voice-legacy-cache
+        uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        with:
+          path: lean-voice-cache
+          key: ${{ steps.voice-legacy-identity.outputs.key }}
+      - name: Migrate verified original provenance without changing native bytes
+        if: steps.voice-legacy-cache.outputs.cache-hit == 'true'
+        run: python .github/scripts/lean_voice.py migrate --legacy-root lean-voice-baseline
       - name: Reclaim unused SDK space on disposable Linux runners
-        if: runner.os == 'Linux' && steps.voice-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Linux' && steps.voice-cache.outputs.cache-hit != 'true' && steps.voice-legacy-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
@@ -121,17 +142,17 @@ jobs:
           df -h .
           if [[ "$TARGET" == *-linux-gnu ]]; then free -h; fi
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
-        if: steps.voice-cache.outputs.cache-hit != 'true'
+        if: steps.voice-cache.outputs.cache-hit != 'true' && steps.voice-legacy-cache.outputs.cache-hit != 'true'
         with:
           bazelisk-version: 1.28.1
           # Keep Windows paths short without Hyper-V or a provisioned Dev Drive.
           output-base: ${{ runner.temp }}/lean-bazel
       - uses: ./.github/actions/setup-msvc-env
-        if: runner.os == 'Windows' && steps.voice-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && steps.voice-cache.outputs.cache-hit != 'true' && steps.voice-legacy-cache.outputs.cache-hit != 'true'
         with:
           target: ${{ matrix.target }}
       - name: Download and verify public pinned Windows build inputs
-        if: runner.os == 'Windows' && steps.voice-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && steps.voice-cache.outputs.cache-hit != 'true' && steps.voice-legacy-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -153,7 +174,7 @@ jobs:
           "VOICE_WINDOWS_SYSTEM_ROOT=$env:SystemRoot" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           "VOICE_WINDOWS_HOST_ARCH=$env:PROCESSOR_ARCHITECTURE" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build same-commit native helper and private audio runtime
-        if: steps.voice-cache.outputs.cache-hit != 'true'
+        if: steps.voice-cache.outputs.cache-hit != 'true' && steps.voice-legacy-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           # MODULE.bazel.lock is a sealed input, never a build-generated update.
@@ -181,9 +202,10 @@ jobs:
           bazel --host_jvm_args=-Xmx2g build -c opt "${args[@]}" \
             //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
       - name: Stage and seal the matching runtime
-        if: steps.voice-cache.outputs.cache-hit != 'true'
+        if: steps.voice-cache.outputs.cache-hit != 'true' && steps.voice-legacy-cache.outputs.cache-hit != 'true'
         env:
           EXPECTED_VOICE_INPUT_FINGERPRINT: ${{ steps.voice-identity.outputs.fingerprint }}
+          EXPECTED_VOICE_WORKSPACE_VERSION: ${{ steps.voice-identity.outputs.workspace-version }}
         run: |
           set -euo pipefail
           runtime="bazel-bin/third_party/voice/native_runtime_$VOICE_PREFIX"
@@ -210,7 +232,8 @@ jobs:
           mkdir lean-voice-cache
           tar -C "$output" -czf "lean-voice-cache/lean-voice-$TARGET.tar.gz" runtime "codex-voice-host$suffix"
           python .github/scripts/lean_voice.py seal --staged "$output" \
-            --expected-input-fingerprint "$EXPECTED_VOICE_INPUT_FINGERPRINT"
+            --expected-input-fingerprint "$EXPECTED_VOICE_INPUT_FINGERPRINT" \
+            --expected-workspace-version "$EXPECTED_VOICE_WORKSPACE_VERSION"
       - name: Verify native provenance, bytes, build stamp and private runtime initialization
         run: python .github/scripts/lean_voice.py verify --smoke
       - name: Save immutable voice bytes only after native validation

@@ -111,13 +111,24 @@ runs to that tag, so different tags cannot reuse each other's entries.
 
 ### Native voice
 
-The workflow reuses a sealed voice helper and audio runtime only when its exact
-build-input cache key matches. Each platform has its own key. The key covers voice
+The workflow reuses a sealed voice helper and audio runtime when its native
+compatibility key matches. Each platform has its own key. The key covers voice
 sources and their local dependencies, the shared voice protocol, Cargo manifests
-and lockfile, native runtime inputs, Bazel configuration and patches, build recipe,
-and runner image. CLI-only and bundled-skill source changes do not invalidate it.
-Workspace version changes do invalidate it because those versions are compiler
-inputs.
+and locked dependencies, native runtime inputs, Bazel configuration and patches,
+native build and staging commands, runner image, and Python version. CLI-only and
+bundled-skill source changes do not invalidate it. Cache transport and validation
+code are not native compilation inputs.
+
+An inherited workspace release-version bump does not invalidate unchanged voice.
+Only that workspace version and matching local lockfile package versions and
+references are normalized for compatibility. External versions, dependency
+features, and independently versioned local packages remain inputs. Build files
+are never rewritten. Bazel still passes the original package versions to the
+compiler, so reuse means a compatible original build, not a claim that recompiling
+the new release would produce identical bytes. Provenance retains the original
+workspace version and voice commit. Local voice source that directly consumes
+`CARGO_PKG_VERSION` causes identity calculation to fail pending a compatibility
+review.
 
 A cache hit skips native compilation, not validation. The workflow checks the
 artifact's provenance and digests, embeds the original voice commit into the new
@@ -125,9 +136,15 @@ CLI, and runs the packaged voice handshake and runtime smoke checks. The release
 records separate app and voice commits. Reused binaries are never relabeled as
 new builds. Any platform failure still blocks publication.
 
-The first run with caching enabled builds and seeds the cache. An absent or evicted
-cache entry triggers a rebuild. Earlier workflow runs do not populate this cache.
-An invalid restored artifact fails validation rather than silently shipping it.
+The workflow can migrate existing version-1 caches from the published
+`0.160.0-lean.2` source commit without rebuilding native voice. It compares that
+pinned source with the current compatibility inputs before looking up the exact
+original cache key. A restored artifact must pass its original checkout proof
+and payload checks before its provenance is migrated. The archive stays unchanged
+and the original provenance is retained. No old checkout scripts are executed.
+Migration still requires the same runner image and Python version. An absent,
+evicted, or incompatible cache triggers a rebuild. An invalid restored artifact
+fails validation rather than silently shipping it.
 
 ## Package contents and boundaries
 

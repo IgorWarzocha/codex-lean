@@ -46,14 +46,14 @@ def extract_archive(archive: Path, output: Path) -> None:
 
 
 def verify_artifact(directory: Path, target: str, output: Path, *, root: Path = REPO_ROOT,
-                    current_image: bool = True) -> dict:
+                    current_image: bool = True, legacy: bool = False) -> dict:
     proof = directory / f"lean-voice-{target}.provenance.json"
     archive = directory / f"lean-voice-{target}.tar.gz"
     if ({path.name for path in directory.iterdir()} != {proof.name, archive.name}
             or proof.is_symlink() or not proof.is_file()):
         raise ValueError("voice artifact must contain exactly a regular archive and provenance")
     provenance = json.loads(proof.read_text(encoding="utf-8"))
-    cache.validate_provenance(provenance, target, root=root, current_image=current_image)
+    cache.validate_provenance(provenance, target, root=root, current_image=current_image, legacy=legacy)
     if archive.is_symlink() or digest(archive) != provenance["archiveSha256"]:
         raise ValueError("voice archive digest mismatch")
     output.mkdir()  # Never mix old and new extraction trees.
@@ -65,6 +65,33 @@ def verify_artifact(directory: Path, target: str, output: Path, *, root: Path = 
     if set(cache.inventory(output)) != expected:
         raise ValueError("voice archive has unexpected files")
     return provenance
+
+
+def legacy_identity(legacy_root: Path, target: str, *, root: Path = REPO_ROOT) -> str | None:
+    if cache.source_fingerprint(legacy_root, target) != cache.source_fingerprint(root, target):
+        return None
+    source = cache.source_fingerprint(legacy_root, target, legacy=True)
+    fingerprint = cache.input_fingerprint(source, cache.image_identity(), cache.tool_identity())
+    return f"lean-voice-v1-{target}-{fingerprint}"
+
+
+def migrate_artifact(directory: Path, target: str, legacy_root: Path, *, root: Path = REPO_ROOT) -> dict:
+    """Re-attest verified v1 bytes under the explicit release-version policy."""
+    if legacy_identity(legacy_root, target, root=root) is None:
+        raise ValueError("original voice build is incompatible with this checkout")
+    with tempfile.TemporaryDirectory(prefix="lean-voice-migrate-") as temporary:
+        original = verify_artifact(directory, target, Path(temporary) / "payload",
+                                   root=legacy_root, legacy=True)
+    source = cache.source_fingerprint(root, target)
+    proof = {**original, "schemaVersion": cache.SCHEMA,
+             "compatibilityPolicy": cache.COMPATIBILITY_POLICY,
+             "workspaceVersion": cache.workspace_version(legacy_root),
+             "sourceFingerprint": source,
+             "inputFingerprint": cache.input_fingerprint(source, original["runnerImage"], original["toolVersions"]),
+             "legacyProvenance": original}
+    cache.validate_provenance(proof, target, root=root, current_image=True)
+    (directory / f"lean-voice-{target}.provenance.json").write_text(json.dumps(proof, indent=2) + "\n", encoding="utf-8")
+    return proof
 
 
 def add_voice(package: Path, target: str, version: str, commit: str) -> Path:
@@ -210,11 +237,13 @@ def native_smoke(staged: Path, target: str, commit: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("identity", "seal", "verify"))
+    parser.add_argument("command", choices=("identity", "legacy-identity", "migrate", "seal", "verify"))
     parser.add_argument("--target", default=os.environ.get("VOICE_TARGET") or os.environ.get("TARGET"))
     parser.add_argument("--directory", type=Path, default=REPO_ROOT / "lean-voice-cache")
     parser.add_argument("--staged", type=Path)
     parser.add_argument("--expected-input-fingerprint")
+    parser.add_argument("--expected-workspace-version")
+    parser.add_argument("--legacy-root", type=Path)
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--export-env", action="store_true")
     args = parser.parse_args()
@@ -223,13 +252,25 @@ def main() -> None:
                                               cache.image_identity(), cache.tool_identity())
         print(f"key=lean-voice-v{cache.SCHEMA}-{args.target}-{fingerprint}")
         print(f"fingerprint={fingerprint}")
+        print(f"workspace-version={cache.workspace_version(REPO_ROOT)}")
+    elif args.command in ("legacy-identity", "migrate"):
+        if args.legacy_root is None:
+            parser.error(f"{args.command} requires --legacy-root")
+        if args.command == "legacy-identity":
+            key = legacy_identity(args.legacy_root, args.target)
+            print(f"key={key or ''}")
+        else:
+            migrate_artifact(args.directory, args.target, args.legacy_root)
     elif args.command == "seal":
         if args.staged is None:
             parser.error("seal requires --staged")
         if args.expected_input_fingerprint is None:
             parser.error("seal requires --expected-input-fingerprint from pre-build identity")
+        if args.expected_workspace_version is None:
+            parser.error("seal requires --expected-workspace-version from pre-build identity")
         cache.seal_artifact(args.directory, args.staged, args.target, os.environ["STABLE_GIT_COMMIT"],
-                            expected_input_fingerprint=args.expected_input_fingerprint)
+                            expected_input_fingerprint=args.expected_input_fingerprint,
+                            expected_workspace_version=args.expected_workspace_version)
     else:
         with tempfile.TemporaryDirectory(prefix="lean-voice-verify-") as temporary:
             staged = Path(temporary) / "payload"
