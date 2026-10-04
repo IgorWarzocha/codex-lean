@@ -50,7 +50,6 @@ impl<'a> ResolvedMessage<'a> {
     }
 }
 
-const REQUEST_USER_INPUT_ASYNC_DESCRIPTION: &str = "Ask the user one or more questions during ongoing work. Use this tool only to request missing information, preferences, constraints, clarification, or approval. The tool returns immediately without ending the turn or waiting for a reply; any reply arrives asynchronously as a new user message. Keep questions concise, self-contained, and easy to understand, using a level of detail appropriate to the user and task. The UI always allows a free-text answer, including when suggested options are provided. A preselected option is not submitted automatically.";
 const REMINDER_MESSAGE_TEMPLATE: &str = concat!(
     "Your context window is nearly exhausted (only {n_remaining} tokens remaining) and will be automatically reset for you soon. ",
     "Once reset, message items in current context window will be cleared in the new window, but notes and history items will be persistent across windows."
@@ -148,26 +147,6 @@ impl<'a> ResolvedModelMessages<'a> {
     pub fn confirmation_policies(&self) -> Option<&'a ConfirmationPolicies> {
         self.catalog_messages
             .and_then(|messages| messages.confirmation_policies.as_ref())
-    }
-
-    /// Resolves the asynchronous user-input tool description.
-    pub fn request_user_input_async_description(&self) -> &'a str {
-        self.catalog_messages
-            .and_then(|messages| messages.tools.as_ref())
-            .and_then(|tools| tools.send_user_message_async.as_ref())
-            .and_then(|tool| tool.description.as_deref())
-            .unwrap_or(REQUEST_USER_INPUT_ASYNC_DESCRIPTION)
-    }
-
-    /// Selects the asynchronous user-input schema; parsing belongs to the tool consumer.
-    pub fn request_user_input_async_parameters_override(&self) -> Option<&'a str> {
-        self.catalog_messages?
-            .tools
-            .as_ref()?
-            .send_user_message_async
-            .as_ref()?
-            .parameters
-            .as_deref()
     }
 
     /// Selects a V2 tool's static description by its name, independently of its runtime namespace.

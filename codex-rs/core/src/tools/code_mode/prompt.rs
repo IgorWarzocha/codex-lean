@@ -95,6 +95,16 @@ fn tool_usage(tool: &ToolDefinition) -> String {
                 "- await tools.{name}(patch) // Raw string: *** Begin Patch / *** End Patch. Actions: *** Add File: path (+ lines), *** Update File: path, *** Delete File: path. *** Move to: path immediately after Update File, with a nonempty @@ hunk (one unchanged context line for a pure move). Update hunks: @@, exact context, space/+/- prefixes, file order. @@ text: context, not a line range"
             );
         }
+        if tool.tool_name.name == "request_user_input"
+            && tool.kind == CodeModeToolKind::Function
+            && let Some(delivery) = tool
+                .input_schema
+                .as_ref()
+                .and_then(|schema| schema["properties"].get("delivery"))
+        {
+            let delivery = render_compact_input_type(delivery);
+            return format!("- await tools.{name}(args) // delivery?: {delivery} (default wait)");
+        }
         if let Some(fields) = common_fields(&tool.tool_name.name)
             && tool.kind == CodeModeToolKind::Function
             && let Some(schema) = tool.input_schema.as_ref()

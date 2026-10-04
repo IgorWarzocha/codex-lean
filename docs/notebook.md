@@ -65,6 +65,18 @@ Startup context and notebook status list exact-version npm imports found in succ
 
 State lives under `$CODEX_HOME/notebook`, outside the working tree. These private files contain code and serialized values, not encrypted data. Project state is shared by directories within the same Git repository. Session checkpoints remain thread-private. `--ephemeral` keeps checkpoints in memory and disables profile writes and journals.
 
+## Questions for the user
+
+The agent asks through `tools.request_user_input` inside `exec`, without separate
+top-level question tools. `delivery: "wait"` is the default and returns an answer
+object after the user responds. `delivery: "async"` returns `{ accepted: true }`
+immediately so other work can continue. Async replies arrive as user messages.
+Available delivery modes follow the model and collaboration-mode settings.
+
+Both modes use the native CLI and desktop question interfaces. Questions can
+offer choices or omit them for free-text answers. Notebook cancellation also
+cancels a pending wait.
+
 ## Remote notes and history
 
 Codex backend authentication enables remote notes and history independently of token-budget settings. Agents can call them through `exec`, including independent calls in `Promise.all`. Await dependent writes to the same note path.

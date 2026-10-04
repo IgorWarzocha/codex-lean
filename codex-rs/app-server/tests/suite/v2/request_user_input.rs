@@ -12,17 +12,19 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
+use codex_features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::openai_models::ReasoningEffort;
 use core_test_support::responses;
 use serde_json::json;
+use test_case::test_case;
 use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-fn create_request_user_input_sse_response(call_id: &str) -> anyhow::Result<String> {
+fn create_request_user_input_sse_response(call_id: &str, notebook: bool) -> anyhow::Result<String> {
     let tool_call_arguments = serde_json::to_string(&json!({
         "questions": [{
             "id": "confirm_path",
@@ -38,57 +40,65 @@ fn create_request_user_input_sse_response(call_id: &str) -> anyhow::Result<Strin
         }]
     }))?;
 
+    let call = if notebook {
+        responses::ev_custom_tool_call(
+            call_id,
+            "exec",
+            &format!("text(await tools.request_user_input({tool_call_arguments}));"),
+        )
+    } else {
+        responses::ev_function_call(call_id, "request_user_input", &tool_call_arguments)
+    };
     Ok(responses::sse(vec![
         responses::ev_response_created("resp-1"),
-        responses::ev_function_call(call_id, "request_user_input", &tool_call_arguments),
+        call,
         responses::ev_completed("resp-1"),
     ]))
 }
 
+#[test_case(ModeKind::Plan, false; "direct_plan")]
+#[test_case(ModeKind::Default, false; "direct_default")]
+#[test_case(ModeKind::Plan, true; "notebook_plan")]
+#[test_case(ModeKind::Default, true; "notebook_default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn request_user_input_round_trip() -> Result<()> {
-    request_user_input_round_trip_for_mode(
-        ModeKind::Plan,
-        /*enable_default_mode_feature*/ false,
-        /*expected_is_blocking*/ true,
-    )
-    .await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn request_user_input_default_mode_forwards_non_blocking() -> Result<()> {
-    request_user_input_round_trip_for_mode(
-        ModeKind::Default,
-        /*enable_default_mode_feature*/ true,
-        /*expected_is_blocking*/ false,
-    )
-    .await
-}
-
-async fn request_user_input_round_trip_for_mode(
-    mode: ModeKind,
-    enable_default_mode_feature: bool,
-    expected_is_blocking: bool,
-) -> Result<()> {
+async fn request_user_input_round_trip(mode: ModeKind, notebook: bool) -> Result<()> {
     let codex_home = tempfile::TempDir::new()?;
     let responses = vec![
-        create_request_user_input_sse_response("call1")?,
+        create_request_user_input_sse_response("call1", notebook)?,
         create_final_assistant_message_sse_response("done")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri())
+    let config = MockResponsesConfig::new(&server.uri())
         .with_approval_policy("on-request")
-        .write(codex_home.path())?;
+        .with_sandbox_mode("danger-full-access")
+        .with_root_config("context_strategy = \"compaction\"");
+    let config = if notebook {
+        config
+            .enable_feature(Feature::CodeModeOnly)
+            .with_extra_config(&format!(
+                "[features.code_mode]\nruntime = \"notebook\"\ndeno_program = {}",
+                serde_json::to_string(
+                    &std::env::var("DENO_PROGRAM").unwrap_or_else(|_| "deno".into())
+                )?
+            ))
+    } else {
+        config
+            .disable_feature(Feature::CodeMode)
+            .disable_feature(Feature::CodeModeOnly)
+    };
+    config.write(codex_home.path())?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build_initialized()
         .await?;
 
+    let cwd = mcp.auto_env_params()?.cwd;
     let ThreadStartResponse { thread, .. } = mcp
         .start_thread(ThreadStartParams {
             model: Some("mock-model".to_string()),
-            config: enable_default_mode_feature.then(|| {
+            cwd: Some(cwd.to_string()),
+            config: (mode == ModeKind::Default).then(|| {
                 std::collections::HashMap::from([(
                     "features.default_mode_request_user_input".to_string(),
                     json!(true),
@@ -134,9 +144,14 @@ async fn request_user_input_round_trip_for_mode(
 
     assert_eq!(params.thread_id, thread.id);
     assert_eq!(params.turn_id, turn.id);
-    assert_eq!(params.item_id, "call1");
+    assert!(!params.item_id.is_empty());
+    if !notebook {
+        assert_eq!(params.item_id, "call1");
+    }
     assert_eq!(params.questions.len(), 1);
-    assert_eq!(params.is_blocking, expected_is_blocking);
+    assert_eq!(params.questions[0].id, "confirm_path");
+    assert_eq!(params.questions[0].question, "Proceed with the plan?");
+    assert_eq!(params.is_blocking, mode == ModeKind::Plan);
     assert_eq!(params.auto_resolution_ms, None);
     let resolved_request_id = request_id.clone();
 
@@ -144,7 +159,7 @@ async fn request_user_input_round_trip_for_mode(
         request_id,
         serde_json::json!({
             "answers": {
-                "confirm_path": { "answers": ["yes"] }
+                "confirm_path": { "answers": ["Yes (Recommended)"] }
             }
         }),
     )
@@ -175,5 +190,26 @@ async fn request_user_input_round_trip_for_mode(
         }
     }
 
+    let requests = server.received_requests().await.expect("recorded requests");
+    let requests = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .collect::<Vec<_>>();
+    assert_eq!(requests.len(), 2);
+    let follow_up: serde_json::Value = serde_json::from_slice(&requests[1].body)?;
+    let output_type = if notebook {
+        "custom_tool_call_output"
+    } else {
+        "function_call_output"
+    };
+    let output = follow_up["input"]
+        .as_array()
+        .expect("input array")
+        .iter()
+        .find(|item| item["type"] == output_type && item["call_id"] == "call1")
+        .expect("question result returned to the model");
+    let output = output["output"].to_string();
+    assert!(output.contains("confirm_path"), "{output}");
+    assert!(output.contains("Yes (Recommended)"), "{output}");
     Ok(())
 }

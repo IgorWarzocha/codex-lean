@@ -340,6 +340,7 @@ async fn astra_asks_an_async_question_and_receives_the_answer_while_working() ->
     let config_server = start_mock_server().await;
     let base_url = format!("{}/v1", streaming.uri());
     let test = test_codex()
+        .with_v8_runtime()
         .with_model("gpt-6-astra")
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
@@ -417,20 +418,22 @@ async fn astra_asks_an_async_question_and_receives_the_answer_while_working() ->
         .map(|body| serde_json::from_slice(body))
         .collect::<serde_json::Result<Vec<serde_json::Value>>>()?;
     for request in &requests {
-        let tool = request["input"][0]["tools"]
+        let tools = request["input"][0]["tools"]
             .as_array()
             .expect("Responses Lite tools")
             .iter()
             .flat_map(|namespace| namespace["tools"].as_array().into_iter().flatten())
-            .find(|tool| tool["name"] == "request_user_input_async")
-            .expect("the async question tool should be directly visible to the model");
-        assert_eq!(tool["parameters"], parameters);
+            .collect::<Vec<_>>();
+        assert!(tools.iter().all(|tool| !matches!(
+            tool["name"].as_str(),
+            Some("request_user_input" | "request_user_input_async")
+        )));
     }
     let entries = requests.iter().map(SnapshotEntry::body).collect::<Vec<_>>();
     insta::assert_snapshot!(
         "astra_async_question_and_answer",
         context_snapshot::format_context_snapshot(
-            "Astra uses the catalog question schema to ask who a launch update is for, keeps working, and receives the user's answer in the active turn.",
+            "Astra resumes a recorded async question, keeps working, and receives the user's answer in the active turn without re-advertising the legacy tool.",
             &entries,
             &ContextSnapshotOptions::default().rewrite_known_segments(),
         )

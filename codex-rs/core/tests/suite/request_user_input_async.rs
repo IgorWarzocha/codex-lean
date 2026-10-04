@@ -19,6 +19,7 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
+use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
@@ -33,13 +34,14 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use test_case::test_case;
 
-#[test_case(SessionSource::Exec, false, false; "root_without_tool")]
-#[test_case(SessionSource::Exec, true, true; "root_with_tool")]
-#[test_case(SessionSource::SubAgent(SubAgentSource::Other("test".to_string())), true, false; "subagent")]
+#[test_case(SessionSource::Exec, None, false; "root_without_tool")]
+#[test_case(SessionSource::Exec, Some("send_user_message_async"), true; "root_with_legacy_catalog_name")]
+#[test_case(SessionSource::Exec, Some("request_user_input_async"), true; "root_with_current_catalog_name")]
+#[test_case(SessionSource::SubAgent(SubAgentSource::Other("test".to_string())), Some("request_user_input_async"), false; "subagent")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persistent_async_message_guidance_follows_tool_availability(
     session_source: SessionSource,
-    model_supports_tool: bool,
+    catalog_tool: Option<&'static str>,
     expect_tool_guidance: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -51,16 +53,18 @@ async fn persistent_async_message_guidance_follows_tool_availability(
     )
     .await;
     let test = test_codex()
+        .with_v8_runtime()
         .with_model_info_override("gpt-5.2", move |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
+            model.experimental_supported_tools.retain(|tool| {
+                !matches!(
+                    tool.as_str(),
+                    "send_user_message_async" | "request_user_input_async"
+                )
+            });
             model
                 .experimental_supported_tools
-                .retain(|tool| tool != "send_user_message_async");
-            if model_supports_tool {
-                model
-                    .experimental_supported_tools
-                    .push("send_user_message_async".to_string());
-            }
+                .extend(catalog_tool.map(str::to_string));
             model
                 .supported_reasoning_levels
                 .push(ReasoningEffortPreset {
@@ -108,7 +112,8 @@ async fn persistent_async_message_guidance_follows_tool_availability(
         .find(|text| text.starts_with("<persistent_mode>"))
         .expect("persistent guidance should remain available to every agent");
     assert_eq!(
-        persistent_instructions.contains("via functions.send_user_message_async"),
+        persistent_instructions
+            .contains("via tools.request_user_input with delivery=async inside exec"),
         expect_tool_guidance,
     );
     assert_eq!(
@@ -117,7 +122,7 @@ async fn persistent_async_message_guidance_follows_tool_availability(
             .expect("request tools")
             .iter()
             .any(|tool| tool["name"] == "request_user_input_async"),
-        expect_tool_guidance,
+        false,
     );
 
     Ok(())
@@ -149,6 +154,7 @@ async fn freeform_async_message_requires_root_and_catalog_or_feature_opt_in(
     )
     .await;
     let test = test_codex()
+        .with_v8_runtime()
         .with_model_info_override("gpt-5.2", move |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model.experimental_supported_tools =
@@ -236,6 +242,7 @@ async fn freeform_async_message_emits_an_item_without_ending_the_turn(
     )
     .await;
     let test = test_codex()
+        .with_v8_runtime()
         .with_model_info_override("gpt-5.2", move |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model.experimental_supported_tools = vec!["request_user_input_async".to_string()];
@@ -316,13 +323,23 @@ async fn freeform_async_message_emits_an_item_without_ending_the_turn(
         freeform_tool["description"]
             .as_str()
             .expect("description")
-            .contains("report a critical blocker")
+            .contains("critical blocker")
     );
-    let question_tool = tools
-        .iter()
-        .find(|tool| tool["name"] == "request_user_input_async")
-        .expect("question tool is still directly available");
-    assert_eq!(question_tool["description"], "Questions only.");
+    assert!(
+        tools
+            .iter()
+            .all(|tool| tool["name"] != "request_user_input_async"
+                && tool["name"] != "request_user_input")
+    );
+    assert!(
+        tools
+            .iter()
+            .find(|tool| tool["name"] == "exec")
+            .expect("exec")["description"]
+            .as_str()
+            .expect("exec description")
+            .contains("request_user_input")
+    );
     assert_eq!(
         requests[1].function_call_output_text(CALL_ID),
         Some(r#"{"accepted":true}"#.to_string())
@@ -342,75 +359,63 @@ async fn freeform_async_message_emits_an_item_without_ending_the_turn(
     Ok(())
 }
 
-const CATALOG_ASYNC_PARAMETERS: &str = r#"{
-    "type": "object",
-    "properties": {
-        "questions": {
-            "type": "array",
-            "description": "Catalog questions for the user.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "title": {"type": "string"},
-                    "options": {"type": "array", "items": {"type": "string"}}
-                },
-                "required": ["title"]
-            }
-        }
-    },
-    "required": ["questions"],
-    "additionalProperties": false
-}"#;
-
-#[test_case(None, "send_user_message_async", None; "fallback_description")]
-#[test_case(None, "request_user_input_async", None; "current_catalog_name")]
-#[test_case(Some(ToolMessages::default()), "send_user_message_async", None; "missing_tool")]
-#[test_case(Some(ToolMessages { send_user_message_async: Some(ToolMessage::default()), ..Default::default() }), "send_user_message_async", None; "missing_description")]
-#[test_case(Some(ToolMessages { send_user_message_async: Some(ToolMessage { description: Some("Catalog async message description.".to_string()), ..Default::default() }), ..Default::default() }), "send_user_message_async", None; "catalog_description")]
-#[test_case(Some(ToolMessages { send_user_message_async: Some(ToolMessage { description: Some(String::new()), ..Default::default() }), ..Default::default() }), "send_user_message_async", None; "empty_description")]
-#[test_case(Some(ToolMessages { send_user_message_async: Some(ToolMessage { parameters: Some(CATALOG_ASYNC_PARAMETERS.to_string()), ..Default::default() }), ..Default::default() }), "send_user_message_async", Some(CATALOG_ASYNC_PARAMETERS); "catalog_parameters")]
-#[test_case(Some(ToolMessages { send_user_message_async: Some(ToolMessage { description: Some("Catalog async message description.".to_string()), parameters: Some(CATALOG_ASYNC_PARAMETERS.to_string()) }), ..Default::default() }), "request_user_input_async", Some(CATALOG_ASYNC_PARAMETERS); "catalog_description_and_parameters")]
-#[test_case(Some(ToolMessages { send_user_message_async: Some(ToolMessage { parameters: Some(String::new()), ..Default::default() }), ..Default::default() }), "send_user_message_async", None; "empty_parameters_fallback")]
-#[test_case(Some(ToolMessages { send_user_message_async: Some(ToolMessage { description: Some("Catalog async message description.".to_string()), parameters: Some(r#"{"type":"object","properties":{"questions":{"type":"unsupported"}}}"#.to_string()) }), ..Default::default() }), "send_user_message_async", None; "invalid_parameters_preserve_description")]
+#[test_case(None, false, "request_user_input_async", true; "direct_canonical")]
+#[test_case(None, false, "request_user_input_async", false; "async_without_wait_feature")]
+#[test_case(None, true, "send_user_message_async", true; "recorded_legacy_call")]
+#[test_case(Some(codex_features::CodeModeRuntime::Notebook), false, "request_user_input_async", true; "notebook")]
+#[test_case(Some(codex_features::CodeModeRuntime::V8), false, "send_user_message_async", true; "code_mode")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
-    tool_messages: Option<ToolMessages>,
+    runtime: Option<codex_features::CodeModeRuntime>,
+    legacy_call: bool,
     catalog_tool_name: &'static str,
-    expected_parameters: Option<&'static str>,
+    wait_enabled: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     const CALL_ID: &str = "async-message-call";
     const TITLE: &str = "Which environment should I use?";
-    const MESSAGE: &str =
-        "Which environment should I use?\n- Staging\n- Production\n\nWhat deadline should I use?";
-    let questions = vec![
-        AsyncUserInputQuestion {
-            title: TITLE.to_string(),
-            options: Some(vec!["Staging".to_string(), "Production".to_string()]),
-        },
-        AsyncUserInputQuestion {
-            title: "What deadline should I use?".to_string(),
-            options: None,
-        },
-    ];
-
+    let arguments = if legacy_call {
+        json!({"questions": [
+            {"title": TITLE, "options": ["Staging", "Production"]},
+            {"title": "What deadline should I use?"}
+        ]})
+    } else {
+        json!({"delivery": "async", "questions": [
+            {"id": "environment", "header": "Environment", "question": TITLE, "options": [
+                {"label": "Staging", "description": "Safe testing"},
+                {"label": "Production", "description": "Live changes"}
+            ]},
+            {"id": "deadline", "header": "Deadline", "question": "What deadline should I use?"}
+        ]})
+    };
+    let question_call = if runtime.is_some() {
+        ev_custom_tool_call(
+            CALL_ID,
+            "exec",
+            &format!(
+                "const result = await tools.request_user_input({arguments}); if (result.accepted !== true) throw new Error('expected acceptance'); text(result); text('ASYNC_CONTINUED');"
+            ),
+        )
+    } else {
+        ev_function_call_with_namespace(
+            CALL_ID,
+            "functions",
+            if legacy_call {
+                "request_user_input_async"
+            } else {
+                "request_user_input"
+            },
+            &arguments.to_string(),
+        )
+    };
     let server = start_mock_server().await;
     let responses = mount_sse_sequence(
         &server,
         vec![
             sse(vec![
                 ev_response_created("resp-1"),
-                ev_function_call_with_namespace(
-                    CALL_ID,
-                    "functions",
-                    "request_user_input_async",
-                    &json!({ "questions": [
-                        {"title": TITLE, "options": ["Staging", "Production"]},
-                        {"title": "What deadline should I use?"}
-                    ] })
-                    .to_string(),
-                ),
+                question_call,
                 ev_completed("resp-1"),
             ]),
             sse(vec![
@@ -421,136 +426,204 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
         ],
     )
     .await;
-    let expected_description = tool_messages
-        .as_ref()
-        .and_then(|tools| tools.send_user_message_async.as_ref())
-        .and_then(|tool| tool.description.as_deref())
-        .unwrap_or(
-            "Ask the user one or more questions during ongoing work. Use this tool only to request missing information, preferences, constraints, clarification, or approval. The tool returns immediately without ending the turn or waiting for a reply; any reply arrives asynchronously as a new user message. Keep questions concise, self-contained, and easy to understand, using a level of detail appropriate to the user and task. The UI always allows a free-text answer, including when suggested options are provided. A preselected option is not submitted automatically.",
-        )
-        .to_string();
     let test = test_codex()
+        .with_v8_runtime()
         .with_model_info_override("gpt-5.2", move |model| {
-            model.tool_mode = Some(ToolMode::CodeModeOnly);
-            model.experimental_supported_tools.retain(|tool| {
-                tool != "send_user_message_async" && tool != "request_user_input_async"
+            model.tool_mode = Some(match runtime {
+                Some(codex_features::CodeModeRuntime::Notebook) => ToolMode::CodeModeOnly,
+                Some(codex_features::CodeModeRuntime::V8) => ToolMode::CodeMode,
+                None => ToolMode::Direct,
             });
-            model
-                .experimental_supported_tools
-                .push(catalog_tool_name.to_string());
-            model
-                .model_messages
-                .as_mut()
-                .expect("model instruction metadata")
-                .tools = tool_messages;
+            model.experimental_supported_tools = vec![catalog_tool_name.to_string()];
+            // Old catalog overrides must not replace the consolidated contract.
+            model.model_messages.as_mut().expect("model messages").tools = Some(ToolMessages {
+                send_user_message_async: Some(ToolMessage {
+                    description: Some("Old separate question tool".to_string()),
+                    parameters: Some(
+                        r#"{"type":"object","properties":{"questions":{"type":"string"}}}"#
+                            .to_string(),
+                    ),
+                }),
+                ..Default::default()
+            });
+        })
+        .with_config(move |config| {
+            config.experimental_request_user_input_enabled = wait_enabled;
+            if let Some(runtime) = runtime {
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("enable code mode");
+                config.code_mode.runtime = runtime;
+                config.code_mode.disable_in_process_fallback = false;
+                config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
+            } else {
+                config
+                    .features
+                    .disable(Feature::CodeMode)
+                    .expect("disable code mode");
+                config
+                    .features
+                    .disable(Feature::CodeModeOnly)
+                    .expect("disable code mode only");
+            }
         })
         .build_with_auto_env(&server)
         .await?;
-
     test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Keep me updated.".to_string(),
-            text_elements: Vec::new(),
-        }]))
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Get clarification and continue independent work.".to_string(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(
+                codex_protocol::protocol::ThreadSettingsOverrides {
+                    permission_profile: Some(codex_protocol::models::PermissionProfile::Disabled),
+                    ..Default::default()
+                },
+            ),
+        )
         .await?;
-
-    let started = wait_for_event_match(test.codex.as_ref(), |event| {
-        let EventMsg::ItemStarted(event) = event else {
-            return None;
-        };
-        let TurnItem::AgentMessage(message) = &event.item else {
-            return None;
-        };
-        if message.delivery != Some(AgentMessageDelivery::Async) {
-            return None;
-        }
-        Some(message.clone())
+    let started = wait_for_event_match(test.codex.as_ref(), |event| match event {
+        EventMsg::ItemStarted(event) => match &event.item {
+            TurnItem::AgentMessage(message)
+                if message.delivery == Some(AgentMessageDelivery::Async) =>
+            {
+                Some(message.clone())
+            }
+            _ => None,
+        },
+        _ => None,
     })
     .await;
+    if runtime.is_none() {
+        assert_eq!(started.id, CALL_ID);
+    }
+    let options = if legacy_call {
+        vec!["Staging".to_string(), "Production".to_string()]
+    } else {
+        vec![
+            "Staging: Safe testing".to_string(),
+            "Production: Live changes".to_string(),
+        ]
+    };
+    let message = format!(
+        "{TITLE}\n- {}\n- {}\n\nWhat deadline should I use?",
+        options[0], options[1]
+    );
     assert_eq!(
         serde_json::to_value(&started)?,
         serde_json::to_value(AgentMessageItem {
-            id: CALL_ID.to_string(),
-            content: vec![AgentMessageContent::Text {
-                text: MESSAGE.to_string(),
-            }],
+            id: started.id.clone(),
+            content: vec![AgentMessageContent::Text { text: message }],
             phase: Some(MessagePhase::FinalAnswer),
             memory_citation: None,
             delivery: Some(AgentMessageDelivery::Async),
-            questions: Some(questions),
+            questions: Some(vec![
+                AsyncUserInputQuestion {
+                    title: TITLE.to_string(),
+                    options: Some(options)
+                },
+                AsyncUserInputQuestion {
+                    title: "What deadline should I use?".to_string(),
+                    options: None
+                },
+            ]),
         })?
     );
-
-    let completed = wait_for_event_match(test.codex.as_ref(), |event| {
-        let EventMsg::ItemCompleted(event) = event else {
-            return None;
-        };
-        let TurnItem::AgentMessage(message) = &event.item else {
-            return None;
-        };
-        if message.delivery != Some(AgentMessageDelivery::Async) {
-            return None;
-        }
-        Some(message.clone())
+    let completed = wait_for_event_match(test.codex.as_ref(), |event| match event {
+        EventMsg::ItemCompleted(event) if event.item.id() == started.id => Some(event.item.clone()),
+        _ => None,
     })
     .await;
     assert_eq!(
         serde_json::to_value(completed)?,
-        serde_json::to_value(started)?
+        serde_json::to_value(TurnItem::AgentMessage(started))?
     );
-
     wait_for_event(test.codex.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
-
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);
     for request in &requests {
         let body = request.body_json();
-        let tools = body["tools"].as_array().expect("request tools");
-        let tool = tools
-            .iter()
-            .find(|tool| tool["type"] == "function" && tool["name"] == "request_user_input_async")
-            .expect("the async message tool should be directly visible to the model");
-        assert_eq!(tool["description"], expected_description);
-        assert_eq!(tool["strict"], false);
-        if let Some(expected_parameters) = expected_parameters {
-            assert_eq!(
-                tool["parameters"],
-                serde_json::from_str::<serde_json::Value>(expected_parameters)?
-            );
-        } else {
-            assert_eq!(tool["parameters"]["required"], json!(["questions"]));
-            assert_eq!(tool["parameters"]["additionalProperties"], false);
-            let schema = &tool["parameters"]["properties"]["questions"];
-            assert_eq!(schema["minItems"], 1);
-            assert_eq!(schema["items"]["required"], json!(["title"]));
-            assert_eq!(schema["items"]["additionalProperties"], false);
-            assert_eq!(schema["items"]["properties"]["options"]["minItems"], 1);
-            assert_eq!(
-                schema["items"]["properties"]["options"]["items"]["type"],
-                "string"
-            );
-        }
+        let tools = body["tools"].as_array().expect("tools");
         assert!(
             tools
                 .iter()
-                .all(|tool| tool["name"] != "send_user_message_async")
+                .all(|tool| tool["name"] != "request_user_input_async"
+                    && tool["name"] != "send_user_message_async")
+        );
+        if runtime.is_none() {
+            let tool = tools
+                .iter()
+                .find(|tool| tool["name"] == "request_user_input")
+                .expect("one consolidated tool");
+            assert_eq!(
+                tool["parameters"]["properties"]["delivery"]["enum"],
+                json!(["wait", "async"])
+            );
+            assert_eq!(
+                tool["parameters"]["properties"]["questions"]["type"],
+                "array"
+            );
+            assert_ne!(tool["description"], "Old separate question tool");
+            if !wait_enabled {
+                assert!(
+                    tool["description"]
+                        .as_str()
+                        .expect("description")
+                        .contains("wait unavailable")
+                );
+            }
+        } else {
+            assert!(
+                tools
+                    .iter()
+                    .all(|tool| tool["name"] != "request_user_input")
+            );
+            let instructions = body["instructions"].as_str().expect("request instructions");
+            let exec = tools
+                .iter()
+                .find(|tool| tool["name"] == "exec")
+                .expect("exec");
+            let surface = format!("{instructions}\n{}", exec["description"]);
+            if runtime == Some(codex_features::CodeModeRuntime::Notebook) {
+                assert!(surface.contains("request_user_input"), "{surface}");
+                let line = instructions
+                    .lines()
+                    .find(|line| line.contains("await tools.request_user_input"))
+                    .expect("compact ask usage");
+                assert!(
+                    line.contains("delivery?: \"wait\" | \"async\" (default wait)"),
+                    "{line}"
+                );
+                assert!(line.len() < 140, "{line}");
+            }
+        }
+    }
+    if runtime.is_some() {
+        let output = requests[1].custom_tool_call_output(CALL_ID).to_string();
+        assert!(
+            output.contains("accepted") && output.contains("ASYNC_CONTINUED"),
+            "{output}"
+        );
+    } else {
+        assert_eq!(
+            requests[1].function_call_output_text(CALL_ID),
+            Some(r#"{"accepted":true}"#.to_string())
         );
     }
-    assert_eq!(
-        requests[1].function_call_output_text(CALL_ID),
-        Some(r#"{"accepted":true}"#.to_string())
-    );
-    let has_synthetic_assistant_message = requests[1].input().into_iter().any(|item| {
-        item["type"] == "message" && item["role"] == "assistant" && item.to_string().contains(TITLE)
-    });
     assert!(
-        !has_synthetic_assistant_message,
-        "the user-visible item should not inject a synthetic assistant message into model context"
+        !requests[1]
+            .input()
+            .into_iter()
+            .any(|item| item["type"] == "message"
+                && item["role"] == "assistant"
+                && item.to_string().contains(TITLE))
     );
-
+    test.codex.shutdown_and_wait().await?;
     Ok(())
 }
 
@@ -583,6 +656,7 @@ async fn invalid_async_questions_do_not_emit_an_item(
     )
     .await;
     let test = test_codex()
+        .with_v8_runtime()
         .with_model_info_override("gpt-5.2", |model| {
             model.tool_mode = Some(ToolMode::CodeModeOnly);
             model

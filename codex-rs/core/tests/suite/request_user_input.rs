@@ -83,7 +83,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
         cwd,
         session_configured,
         ..
-    } = test_codex().build(&server).await?;
+    } = test_codex().with_direct_tools().build(&server).await?;
 
     let call_id = "user-input-call";
     let expected_is_blocking = mode == ModeKind::Plan;
@@ -229,12 +229,10 @@ async fn request_user_input_interrupt_emits_deferred_token_count() -> anyhow::Re
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let TestCodex {
-        codex,
-        cwd,
-        session_configured,
-        ..
-    } = test_codex().build(&server).await?;
+    let test = test_codex().with_direct_tools().build(&server).await?;
+    let codex = &test.codex;
+    let cwd = &test.cwd;
+    let session_configured = &test.session_configured;
 
     let call_id = "user-input-interrupt";
     let request_args = json!({
@@ -276,7 +274,7 @@ async fn request_user_input_interrupt_emits_deferred_token_count() -> anyhow::Re
                 collaboration_mode: Some(CollaborationMode {
                     mode: ModeKind::Plan,
                     settings: Settings {
-                        model: session_configured.model,
+                        model: session_configured.model.clone(),
                         reasoning_effort: None,
                         developer_instructions: None,
                     },

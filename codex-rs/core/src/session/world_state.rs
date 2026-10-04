@@ -24,6 +24,7 @@ use crate::context::world_state::RealtimeState;
 use crate::context::world_state::ToolsState;
 use crate::context::world_state::WorldState;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
+use crate::tools::handlers::request_user_input_spec::request_user_input_async_available;
 use codex_connectors::AppToolPolicyEvaluator;
 use codex_extension_api::WorldStateContributionInput;
 use codex_features::Feature;
@@ -224,20 +225,25 @@ impl Session {
             ));
         }
         if !crate::guardian::is_basic_session_source(&turn_context.session_source) {
-            let send_user_message_async_available =
-                !turn_context.session_source.is_non_root_agent()
-                    && step_context
-                        .settings
-                        .model_info
-                        .experimental_supported_tools
-                        .iter()
-                        .any(|tool| tool == "send_user_message_async");
+            let async_user_input_available =
+                request_user_input_async_available(&turn_context.session_source, model_info);
+            let approval_request_channel = async_user_input_available.then_some(
+                if matches!(
+                    step_context.tool_router.tool_mode(),
+                    codex_protocol::openai_models::ToolMode::CodeMode
+                        | codex_protocol::openai_models::ToolMode::CodeModeOnly
+                ) {
+                    " via tools.request_user_input with delivery=async inside exec"
+                } else {
+                    " via functions.request_user_input with delivery=async"
+                },
+            );
             world_state.add_section(PersistentModeState::new(
                 turn_context.config.features.persistent_execution_enabled(
                     step_context.settings.effective_reasoning_effort().as_ref(),
                 ),
                 model_messages.persistent_instructions(),
-                send_user_message_async_available,
+                approval_request_channel,
             ));
         }
         if turn_context.config.include_environment_context {

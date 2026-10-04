@@ -1,30 +1,19 @@
 use crate::function_tool::FunctionCallError;
-use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
-use crate::tools::context::boxed_tool_output;
+use crate::tools::handlers::RequestUserInputHandler;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
-use codex_protocol::items::AgentMessageContent;
-use codex_protocol::items::AgentMessageDelivery;
-use codex_protocol::items::AgentMessageItem;
 use codex_protocol::items::AsyncUserInputQuestion;
-use codex_protocol::items::TurnItem;
-use codex_protocol::models::MessagePhase;
-use codex_tools::JsonSchema;
-use codex_tools::ResponsesApiTool;
+use codex_protocol::request_user_input::RequestUserInputQuestion;
+use codex_protocol::request_user_input::RequestUserInputQuestionOption;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use serde::Deserialize;
-use std::collections::BTreeMap;
 
-const TOOL_NAME: &str = "request_user_input_async";
-
-pub struct RequestUserInputAsyncHandler {
-    pub description: String,
-    pub parameters: Option<String>,
-}
+/// Hidden dispatch compatibility for recorded calls using the previous schema.
+pub struct RequestUserInputAsyncHandler;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,119 +23,72 @@ struct RequestUserInputAsyncArgs {
 
 impl ToolExecutor<ToolInvocation> for RequestUserInputAsyncHandler {
     fn tool_name(&self) -> ToolName {
-        ToolName::plain(TOOL_NAME)
+        ToolName::plain("request_user_input_async")
     }
 
     fn spec(&self) -> ToolSpec {
-        let mut options = JsonSchema::array(
-            JsonSchema::string(/*description*/ None),
-            Some("Display order; recommended first, preselected by default; single selection or automatic free text; no Other or free-text placeholder; omit for free-text-only questions".to_string()),
-        );
-        options.min_items = Some(1);
-        let question = JsonSchema::object(
-            BTreeMap::from([
-                (
-                    "title".to_string(),
-                    JsonSchema::string(Some(
-                        "Complete question with context needed to answer".to_string(),
-                    )),
-                ),
-                ("options".to_string(), options),
-            ]),
-            Some(vec!["title".to_string()]),
-            /*additional_properties*/ Some(false.into()),
-        );
-        let mut questions = JsonSchema::array(
-            question,
-            Some("Self-contained questions in display order".to_string()),
-        );
-        questions.min_items = Some(1);
-        let properties = BTreeMap::from([("questions".to_string(), questions)]);
-        let mut parameters = JsonSchema::object(
-            properties,
-            Some(vec!["questions".to_string()]),
-            /*additional_properties*/ Some(false.into()),
-        );
-        if let Some(parameters_override) = &self.parameters {
-            match crate::tools::catalog_parameters::parse(parameters_override) {
-                Ok(schema) => parameters = schema,
-                Err(reason) => tracing::warn!(
-                    tool = TOOL_NAME,
-                    reason,
-                    "Invalid catalog tool parameters; using bundled parameters"
-                ),
-            }
+        let ToolSpec::Function(mut spec) = RequestUserInputHandler {
+            available_modes: Vec::new(),
+            async_enabled: true,
         }
-
-        ToolSpec::Function(ResponsesApiTool {
-            name: TOOL_NAME.to_string(),
-            description: self.description.clone(),
-            strict: false,
-            defer_loading: None,
-            parameters,
-            output_schema: None,
-        })
+        .spec() else {
+            unreachable!("question tool is a function")
+        };
+        spec.name = self.tool_name().name;
+        ToolSpec::Function(spec)
     }
 
-    fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
+    fn handle<'a>(&'a self, mut invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
     where
         ToolInvocation: 'a,
     {
         Box::pin(async move {
-            let ToolInvocation {
-                session,
-                turn,
-                call_id,
-                payload,
-                ..
-            } = invocation;
-            let ToolPayload::Function { arguments } = payload else {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "{TOOL_NAME} handler received unsupported payload"
-                )));
-            };
-            let args: RequestUserInputAsyncArgs = parse_arguments(&arguments)?;
-            if args.questions.is_empty() {
+            let ToolPayload::Function { arguments } = &invocation.payload else {
                 return Err(FunctionCallError::RespondToModel(
-                    "questions must not be empty".to_string(),
+                    "request_user_input_async handler received unsupported payload".to_string(),
+                ));
+            };
+            let args: RequestUserInputAsyncArgs = parse_arguments(arguments)?;
+            if args
+                .questions
+                .iter()
+                .any(|question| question.title.trim().is_empty())
+            {
+                return Err(FunctionCallError::RespondToModel(
+                    "question titles must not be empty".to_string(),
                 ));
             }
-            let mut messages = Vec::with_capacity(args.questions.len());
-            for question in &args.questions {
-                if question.title.trim().is_empty() {
-                    return Err(FunctionCallError::RespondToModel(
-                        "question titles must not be empty".to_string(),
-                    ));
-                }
-                let mut lines = vec![question.title.clone()];
-                if let Some(options) = &question.options {
-                    if options.is_empty() || options.iter().any(|option| option.trim().is_empty()) {
-                        return Err(FunctionCallError::RespondToModel(
-                            "options must contain at least one non-empty answer".to_string(),
-                        ));
-                    }
-                    lines.extend(options.iter().map(|option| format!("- {option}")));
-                }
-                messages.push(lines.join("\n"));
+            let questions = args
+                .questions
+                .into_iter()
+                .enumerate()
+                .map(|(index, question)| RequestUserInputQuestion {
+                    id: format!("question_{index}"),
+                    header: String::new(),
+                    question: question.title,
+                    is_other: true,
+                    is_secret: false,
+                    options: question.options.map(|options| {
+                        options
+                            .into_iter()
+                            .map(|label| RequestUserInputQuestionOption {
+                                label,
+                                description: String::new(),
+                            })
+                            .collect()
+                    }),
+                })
+                .collect::<Vec<_>>();
+            invocation.payload = ToolPayload::Function {
+                arguments: serde_json::json!({"questions": questions, "delivery": "async"})
+                    .to_string(),
+            };
+            RequestUserInputHandler {
+                available_modes: Vec::new(),
+                async_enabled: true,
             }
-
-            let item = TurnItem::AgentMessage(AgentMessageItem {
-                id: call_id,
-                content: vec![AgentMessageContent::Text {
-                    text: messages.join("\n\n"),
-                }],
-                phase: Some(MessagePhase::FinalAnswer),
-                memory_citation: None,
-                delivery: Some(AgentMessageDelivery::Async),
-                questions: Some(args.questions),
-            });
-            session.emit_turn_item_started(turn.as_ref(), &item).await;
-            session.emit_turn_item_completed(turn.as_ref(), item).await;
-
-            Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                r#"{"accepted":true}"#.to_string(),
-                /*success*/ Some(true),
-            )))
+            .handle(invocation)
+            .await
         })
     }
 }

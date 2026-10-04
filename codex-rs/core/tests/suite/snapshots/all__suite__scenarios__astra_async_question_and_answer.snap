@@ -1,33 +1,31 @@
 ---
 source: core/tests/suite/scenarios.rs
-expression: "context_snapshot::format_context_snapshot(\"Astra uses the catalog question schema to ask who a launch update is for, keeps working, and receives the user's answer in the active turn.\",\n&entries, &ContextSnapshotOptions::default().rewrite_known_segments(),)"
+expression: "context_snapshot::format_context_snapshot(\"Astra resumes a recorded async question, keeps working, and receives the user's answer in the active turn without re-advertising the legacy tool.\",\n&entries, &ContextSnapshotOptions::default().rewrite_known_segments(),)"
 ---
-Scenario: Astra uses the catalog question schema to ask who a launch update is for, keeps working, and receives the user's answer in the active turn.
+Scenario: Astra resumes a recorded async question, keeps working, and receives the user's answer in the active turn without re-advertising the legacy tool.
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=3c40fb1561c2a9bf):
-        - namespace/functions; hash=8db3935648c2dd43
+00:additional_tools/developer (3; hash=8698d94654b1d127):
+        - namespace/functions; hash=e5e92ad7bb731fa8
           - custom/exec
           - function/wait
-          - function/request_user_input
-          - function/request_user_input_async
         - namespace/clock: Read or wait on time; hash=988ad490c20d3305
           - function/sleep
-        - namespace/collaboration: Spawn and manage sub-agents; hash=cfdb23f92902eeb9
+        - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
           - function/send_message
           - function/spawn_agent
-          - function/wait_agent
 01:message/developer:
     <MODEL_INSTRUCTIONS>
 02:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
 
-        `request_user_input`, when available: optional questions that materially improve the work, never approva... one concise plain-text question</collaboration_mode> [hash=509c010a092a8d4a]
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
 03:message/developer:
     <MULTI_AGENT_ROLE>
 04:message/developer:

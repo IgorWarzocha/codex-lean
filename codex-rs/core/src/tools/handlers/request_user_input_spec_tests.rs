@@ -1,13 +1,10 @@
 use super::*;
 use codex_features::Feature;
 use codex_features::Features;
-use codex_protocol::config_types::ModeKind;
-use codex_protocol::request_user_input::RequestUserInputQuestion;
-use codex_protocol::request_user_input::RequestUserInputQuestionOption;
-use codex_tools::JsonSchema;
 use codex_tools::request_user_input_available_modes;
 use pretty_assertions::assert_eq;
-use std::collections::BTreeMap;
+use serde_json::json;
+use test_case::test_case;
 
 fn plan_only_available_modes() -> Vec<ModeKind> {
     let mut features = Features::with_defaults();
@@ -19,137 +16,62 @@ fn default_available_modes() -> Vec<ModeKind> {
     request_user_input_available_modes(&Features::with_defaults())
 }
 
-#[test]
-fn request_user_input_tool_includes_questions_schema() {
+#[test_case(false, json!(["wait"]); "wait_only")]
+#[test_case(true, json!(["wait", "async"]); "async_opt_in")]
+fn question_schema_uses_one_shape_and_gates_delivery(
+    async_enabled: bool,
+    deliveries: serde_json::Value,
+) {
+    let ToolSpec::Function(spec) = create_request_user_input_tool("Ask".to_string(), async_enabled)
+    else {
+        panic!("expected function");
+    };
+    let schema = serde_json::to_value(spec.parameters).unwrap();
+    assert_eq!(schema["properties"]["delivery"]["enum"], deliveries);
+    assert_eq!(schema["required"], json!(["questions"]));
     assert_eq!(
-        create_request_user_input_tool("Ask the user to choose.".to_string()),
-        ToolSpec::Function(ResponsesApiTool {
-            name: "request_user_input".to_string(),
-            description: "Ask the user to choose.".to_string(),
-            strict: false,
-            defer_loading: None,
-            parameters: JsonSchema::object(BTreeMap::from([
-                (
-                    "questions".to_string(),
-                    JsonSchema::array(
-                        JsonSchema::object(
-                            BTreeMap::from([
-                                (
-                                    "header".to_string(),
-                                    JsonSchema::string(Some(
-                                        "UI header, at most 12 characters"
-                                            .to_string(),
-                                    )),
-                                ),
-                                (
-                                    "id".to_string(),
-                                    JsonSchema::string(Some(
-                                        "Stable snake_case answer key"
-                                            .to_string(),
-                                    )),
-                                ),
-                                (
-                                    "options".to_string(),
-                                    JsonSchema::array(
-                                        JsonSchema::object(
-                                            BTreeMap::from([
-                                                (
-                                                    "description".to_string(),
-                                                    JsonSchema::string(Some(
-                                                        "Choice impact, one sentence"
-                                                            .to_string(),
-                                                    )),
-                                                ),
-                                                (
-                                                    "label".to_string(),
-                                                    JsonSchema::string(Some(
-                                                        "1-5 words"
-                                                            .to_string(),
-                                                    )),
-                                                ),
-                                            ]),
-                                            Some(vec![
-                                                "label".to_string(),
-                                                "description".to_string(),
-                                            ]),
-                                            Some(false.into()),
-                                        ),
-                                        Some(
-                                            "2-3 mutually exclusive choices; no Other, automatic free text"
-                                                .to_string(),
-                                        ),
-                                    ),
-                                ),
-                                (
-                                    "question".to_string(),
-                                    JsonSchema::string(Some("One sentence".to_string())),
-                                ),
-                            ]),
-                            Some(vec![
-                                "id".to_string(),
-                                "header".to_string(),
-                                "question".to_string(),
-                                "options".to_string(),
-                            ]),
-                            Some(false.into()),
-                        ),
-                        Some(
-                            "At most 3".to_string(),
-                        ),
-                    ),
-                ),
-            ]),
-            Some(vec!["questions".to_string()]),
-            Some(false.into())),
-            output_schema: None,
-        })
+        schema["properties"]["questions"]["items"]["required"],
+        json!(["id", "header", "question"])
+    );
+    assert_eq!(
+        schema["properties"]["questions"]["items"]["properties"]["options"]["items"]["required"],
+        json!(["label", "description"])
     );
 }
 
 #[test]
-fn normalize_request_user_input_tool_args_sets_other_on_every_question() {
-    let args = RequestUserInputToolArgs {
-        questions: vec![RequestUserInputQuestion {
-            id: "confirm".to_string(),
-            header: "Confirm".to_string(),
-            question: "Proceed?".to_string(),
-            is_other: false,
-            is_secret: false,
-            options: Some(vec![RequestUserInputQuestionOption {
-                label: "Yes".to_string(),
-                description: "Continue.".to_string(),
-            }]),
-        }],
-    };
+fn question_arguments_default_to_wait_and_allow_free_text() {
+    let args: RequestUserInputToolArgs = serde_json::from_value(json!({
+        "questions": [{"id": "confirm", "header": "Confirm", "question": "Proceed?"}]
+    }))
+    .unwrap();
+    assert_eq!(args.delivery, UserInputDelivery::Wait);
+    let args = normalize_request_user_input_tool_args(args).unwrap();
+    assert!(args.questions[0].is_other);
+    assert!(args.questions[0].options.is_none());
+}
 
+#[test_case(json!({"questions": []}), "questions must not be empty"; "empty")]
+#[test_case(json!({"questions": [{"id": "", "header": "", "question": "Proceed?"}]}), "question ids and text must not be empty"; "empty_id")]
+#[test_case(json!({"questions": [{"id": "confirm", "header": "", "question": " "}]}), "question ids and text must not be empty"; "empty_text")]
+#[test_case(json!({"questions": [{"id": "confirm", "header": "", "question": "Proceed?", "options": []}]}), "options must contain at least one non-empty answer"; "empty_options")]
+#[test_case(json!({"questions": [{"id": "confirm", "header": "", "question": "Proceed?", "options": [{"label": " ", "description": ""}]}]}), "options must contain at least one non-empty answer"; "blank_option")]
+fn invalid_questions_are_rejected(arguments: serde_json::Value, message: &str) {
+    let args = serde_json::from_value(arguments).unwrap();
     assert_eq!(
-        normalize_request_user_input_tool_args(args.clone()),
-        Ok(RequestUserInputToolArgs {
-            questions: vec![RequestUserInputQuestion {
-                is_other: true,
-                ..args.questions[0].clone()
-            }],
-        })
+        normalize_request_user_input_tool_args(args).unwrap_err(),
+        message
     );
 }
 
 #[test]
-fn normalize_request_user_input_tool_args_rejects_missing_options() {
-    let args = RequestUserInputToolArgs {
-        questions: vec![RequestUserInputQuestion {
-            id: "confirm".to_string(),
-            header: "Confirm".to_string(),
-            question: "Proceed?".to_string(),
-            is_other: false,
-            is_secret: false,
-            options: None,
-        }],
-    };
-
-    assert_eq!(
-        normalize_request_user_input_tool_args(args),
-        Err("request_user_input requires non-empty options for every question".to_string())
-    );
+fn invalid_delivery_and_unknown_arguments_are_rejected() {
+    for arguments in [
+        json!({"questions": [], "delivery": "surprise"}),
+        json!({"questions": [], "mode": "async"}),
+    ] {
+        assert!(serde_json::from_value::<RequestUserInputToolArgs>(arguments).is_err());
+    }
 }
 
 #[test]
@@ -171,15 +93,15 @@ fn request_user_input_unavailable_messages_respect_default_mode_feature_flag() {
 #[test]
 fn request_user_input_tool_description_mentions_available_modes() {
     assert_eq!(
-        request_user_input_tool_description(&plan_only_available_modes()),
+        request_user_input_tool_description(&plan_only_available_modes(), false),
         "Ask the user; wait for answers; Plan mode only".to_string()
     );
     assert_eq!(
-        request_user_input_tool_description(&default_available_modes()),
+        request_user_input_tool_description(&default_available_modes(), false),
         "Ask the user; wait for answers; Default or Plan mode only".to_string()
     );
     assert_eq!(
-        request_user_input_tool_description(&[ModeKind::Default]),
+        request_user_input_tool_description(&[ModeKind::Default], false),
         "Ask the user; wait for answers; Default mode only".to_string()
     );
 }

@@ -938,10 +938,7 @@ async fn request_user_input_tool_respects_experimental_config_gate() {
     let enabled = probe(|_| {}).await;
     enabled.assert_visible_contains(&["request_user_input"]);
     enabled.assert_registered_contains(&["request_user_input"]);
-    assert_eq!(
-        enabled.exposure("request_user_input"),
-        ToolExposure::DirectModelOnly
-    );
+    assert_eq!(enabled.exposure("request_user_input"), ToolExposure::Direct);
 
     let disabled = probe(|turn| {
         update_config(turn, |config| {
@@ -969,28 +966,38 @@ async fn update_plan_tool_respects_config_gate() {
     enabled.assert_registered_contains(&["update_plan"]);
 }
 
+#[test_case::test_case(ToolMode::CodeMode; "code_mode")]
+#[test_case::test_case(ToolMode::CodeModeOnly; "code_mode_only")]
 #[tokio::test]
-async fn request_user_input_stays_direct_in_code_mode_only() {
+async fn request_user_input_is_nested_in_code_mode(mode: ToolMode) {
     let plan = probe(|turn| {
         set_features(turn, &[Feature::CodeMode, Feature::CodeModeOnly]);
+        turn.code_mode_available = true;
+        update_turn_settings_for_test(turn, |settings| {
+            Arc::make_mut(&mut settings.model_info).tool_mode = Some(mode);
+        });
     })
     .await;
-
     plan.assert_visible_contains(&[
-        "request_user_input",
         codex_code_mode::PUBLIC_TOOL_NAME,
         codex_code_mode::WAIT_TOOL_NAME,
     ]);
+    plan.assert_visible_lacks(&["request_user_input", "request_user_input_async"]);
     plan.assert_registered_contains(&["request_user_input"]);
     assert_eq!(
         plan.exposure("request_user_input"),
-        ToolExposure::DirectModelOnly
+        ToolExposure::CodeModeOnly
     );
-
+    assert_eq!(
+        plan.code_mode_tool_names.get("request_user_input"),
+        Some(&ToolName::plain("request_user_input"))
+    );
     let ToolSpec::Freeform(exec) = plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME) else {
         panic!("expected code mode exec tool");
     };
-    assert!(!exec.description.contains("request_user_input"));
+    if mode == ToolMode::CodeModeOnly {
+        assert!(exec.description.contains("request_user_input"));
+    }
 }
 
 #[tokio::test]
@@ -3285,7 +3292,6 @@ async fn code_mode_only_can_expose_namespaced_multi_agent_v2_as_normal_tools() {
         vec![
             "exec",
             "wait",
-            "request_user_input",
             "agents",
             // Hosted Responses tool.
             "web_search",
@@ -3450,7 +3456,6 @@ async fn hosted_web_search_and_standalone_image_generation_follow_runtime_gates(
             // Code-mode entrypoints.
             codex_code_mode::PUBLIC_TOOL_NAME,
             codex_code_mode::WAIT_TOOL_NAME,
-            "request_user_input",
             // Multi-agent v2 tools.
             MULTI_AGENT_V2_NAMESPACE,
             // Hosted Responses tools.

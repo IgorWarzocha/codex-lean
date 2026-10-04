@@ -24,8 +24,46 @@ use std::sync::Arc;
 use test_case::test_case;
 use tokio::sync::Mutex;
 
+#[test_case("async", false, vec![ModeKind::Default], "request_user_input async delivery is unavailable for this model"; "async_model_gate")]
+#[test_case("wait", true, vec![], "request_user_input is unavailable in Default mode"; "wait_config_gate")]
 #[tokio::test]
-async fn multi_agent_v2_request_user_input_rejects_subagent_threads() {
+async fn request_user_input_delivery_respects_availability(
+    delivery: &str,
+    async_enabled: bool,
+    available_modes: Vec<ModeKind>,
+    message: &str,
+) {
+    let (session, turn, events) = make_session_and_context_with_rx().await;
+    let result = RequestUserInputHandler { available_modes, async_enabled }.handle(ToolInvocation {
+        session,
+        step_context: StepContext::for_test(Arc::clone(&turn)),
+        turn,
+        cancellation_token: tokio_util::sync::CancellationToken::new(),
+        tracker: Arc::new(Mutex::new(TurnDiffTracker::default())),
+        call_id: "unavailable".to_string(),
+        tool_name: codex_tools::ToolName::plain(REQUEST_USER_INPUT_TOOL_NAME),
+        source: crate::tools::context::ToolCallSource::Direct,
+        payload: ToolPayload::Function {
+            arguments: json!({"delivery": delivery, "questions": [{"id": "confirm", "header": "Confirm", "question": "Proceed?"}]}).to_string(),
+        },
+    }).await;
+    let Err(error) = result else {
+        panic!("unavailable delivery must fail")
+    };
+    assert_eq!(
+        error,
+        FunctionCallError::RespondToModel(message.to_string())
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "unavailable questions must not reach the UI"
+    );
+}
+
+#[test_case("wait"; "wait")]
+#[test_case("async"; "async_delivery")]
+#[tokio::test]
+async fn multi_agent_v2_request_user_input_rejects_subagent_threads(delivery: &str) {
     let (session, mut turn) = make_session_and_context().await;
     turn.session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id: ThreadId::new(),
@@ -38,6 +76,7 @@ async fn multi_agent_v2_request_user_input_rejects_subagent_threads() {
 
     let result = RequestUserInputHandler {
         available_modes: Vec::new(),
+        async_enabled: true,
     }
     .handle(ToolInvocation {
         session: Arc::new(session),
@@ -50,6 +89,7 @@ async fn multi_agent_v2_request_user_input_rejects_subagent_threads() {
         source: crate::tools::context::ToolCallSource::Direct,
         payload: ToolPayload::Function {
             arguments: json!({
+                "delivery": delivery,
                 "questions": [{
                     "header": "Hdr",
                     "question": "Pick one",
@@ -116,6 +156,7 @@ async fn request_user_input_sets_non_blocking_outside_plan_mode(
         async move {
             RequestUserInputHandler {
                 available_modes: vec![ModeKind::Default],
+                async_enabled: false,
             }
             .handle(ToolInvocation {
                 session,
@@ -237,6 +278,7 @@ async fn request_user_input_sets_blocking_from_turn_mode() {
         async move {
             RequestUserInputHandler {
                 available_modes: vec![ModeKind::Plan],
+                async_enabled: false,
             }
             .handle(ToolInvocation {
                 session,

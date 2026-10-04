@@ -25,7 +25,7 @@ fn persistent_instructions_follow_mode_and_catalog_updates_without_duplicates() 
         world_state.add_section(PersistentModeState::new(
             enabled,
             instructions,
-            /*send_user_message_async_available*/ false,
+            /*approval_request_channel*/ None,
         ));
         let (snapshot, fragments) = world_state.render_history_diff(previous.as_ref(), &history);
         let updates = fragments
@@ -64,7 +64,7 @@ fn retained_persistent_instructions_are_replaced_or_retired_without_a_snapshot()
         world_state.add_section(PersistentModeState::new(
             enabled,
             "current instructions",
-            /*send_user_message_async_available*/ false,
+            /*approval_request_channel*/ None,
         ));
         assert_eq!(
             world_state

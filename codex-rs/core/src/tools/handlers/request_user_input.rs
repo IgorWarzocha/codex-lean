@@ -1,11 +1,13 @@
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
+use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::request_user_input_spec::REQUEST_USER_INPUT_TOOL_NAME;
 use crate::tools::handlers::request_user_input_spec::RequestUserInputToolArgs;
+use crate::tools::handlers::request_user_input_spec::UserInputDelivery;
 use crate::tools::handlers::request_user_input_spec::create_request_user_input_tool;
 use crate::tools::handlers::request_user_input_spec::normalize_request_user_input_tool_args;
 use crate::tools::handlers::request_user_input_spec::request_user_input_tool_description;
@@ -17,12 +19,55 @@ use codex_history::RetainedContextEvent;
 use codex_history::VerifiedAnswer;
 use codex_history::VerifiedQuestionAnswer;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::items::AgentMessageContent;
+use codex_protocol::items::AgentMessageDelivery;
+use codex_protocol::items::AgentMessageItem;
+use codex_protocol::items::AsyncUserInputQuestion;
+use codex_protocol::items::TurnItem;
+use codex_protocol::models::MessagePhase;
+use codex_protocol::models::ResponseInputItem;
 use codex_protocol::request_user_input::RequestUserInputArgs;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 
 pub struct RequestUserInputHandler {
     pub available_modes: Vec<ModeKind>,
+    pub async_enabled: bool,
+}
+
+/// Native responses keep their serialized payload; exec receives the same JSON as a value.
+struct RequestUserInputOutput {
+    native: FunctionToolOutput,
+    value: serde_json::Value,
+}
+
+impl RequestUserInputOutput {
+    fn new(content: String) -> Result<Self, FunctionCallError> {
+        let value = serde_json::from_str(&content).map_err(|err| {
+            FunctionCallError::Fatal(format!(
+                "failed to decode request_user_input response: {err}"
+            ))
+        })?;
+        Ok(Self {
+            native: FunctionToolOutput::from_text(content, Some(true)),
+            value,
+        })
+    }
+}
+
+impl ToolOutput for RequestUserInputOutput {
+    fn log_output(&self) -> String {
+        self.native.log_output()
+    }
+    fn success_for_logging(&self) -> bool {
+        self.native.success_for_logging()
+    }
+    fn to_response_item(&self, call_id: &str, payload: &ToolPayload) -> ResponseInputItem {
+        self.native.to_response_item(call_id, payload)
+    }
+    fn code_mode_result(&self, _payload: &ToolPayload) -> serde_json::Value {
+        self.value.clone()
+    }
 }
 
 impl ToolExecutor<ToolInvocation> for RequestUserInputHandler {
@@ -31,7 +76,10 @@ impl ToolExecutor<ToolInvocation> for RequestUserInputHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_request_user_input_tool(request_user_input_tool_description(&self.available_modes))
+        create_request_user_input_tool(
+            request_user_input_tool_description(&self.available_modes, self.async_enabled),
+            self.async_enabled,
+        )
     }
 
     fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
@@ -70,14 +118,27 @@ impl RequestUserInputHandler {
             ));
         }
 
+        let args: RequestUserInputToolArgs = parse_arguments(&arguments)?;
+        let args = normalize_request_user_input_tool_args(args)
+            .map_err(FunctionCallError::RespondToModel)?;
+        if args.delivery == UserInputDelivery::Async {
+            if !self.async_enabled {
+                return Err(FunctionCallError::RespondToModel(
+                    "request_user_input async delivery is unavailable for this model".to_string(),
+                ));
+            }
+            let item = async_user_input_item(call_id, args.questions);
+            session.emit_turn_item_started(turn.as_ref(), &item).await;
+            session.emit_turn_item_completed(turn.as_ref(), item).await;
+            return Ok(boxed_tool_output(RequestUserInputOutput::new(
+                r#"{"accepted":true}"#.to_string(),
+            )?));
+        }
+
         let mode = turn.collaboration_mode().mode;
         if let Some(message) = request_user_input_unavailable_message(mode, &self.available_modes) {
             return Err(FunctionCallError::RespondToModel(message));
         }
-
-        let args: RequestUserInputToolArgs = parse_arguments(&arguments)?;
-        let args = normalize_request_user_input_tool_args(args)
-            .map_err(FunctionCallError::RespondToModel)?;
         let args = RequestUserInputArgs {
             questions: args.questions,
             is_blocking: mode == ModeKind::Plan,
@@ -145,11 +206,56 @@ impl RequestUserInputHandler {
             }
         }
 
-        Ok(boxed_tool_output(FunctionToolOutput::from_text(
-            content,
-            /*success*/ Some(true),
-        )))
+        Ok(boxed_tool_output(RequestUserInputOutput::new(content)?))
     }
+}
+
+fn async_user_input_item(
+    call_id: String,
+    questions: Vec<codex_protocol::request_user_input::RequestUserInputQuestion>,
+) -> TurnItem {
+    // Keep the consumer's async AgentMessage contract and index-based answer IDs.
+    let questions = questions
+        .into_iter()
+        .map(|question| AsyncUserInputQuestion {
+            title: question.question,
+            options: question.options.map(|options| {
+                options
+                    .into_iter()
+                    .map(|option| {
+                        if option.description.trim().is_empty() {
+                            option.label
+                        } else {
+                            format!("{}: {}", option.label, option.description)
+                        }
+                    })
+                    .collect()
+            }),
+        })
+        .collect::<Vec<_>>();
+    let text = questions
+        .iter()
+        .map(|question| {
+            let mut lines = vec![question.title.clone()];
+            lines.extend(
+                question
+                    .options
+                    .iter()
+                    .flatten()
+                    .map(|option| format!("- {option}")),
+            );
+            lines.join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    TurnItem::AgentMessage(AgentMessageItem {
+        id: call_id,
+        content: vec![AgentMessageContent::Text { text }],
+        phase: Some(MessagePhase::FinalAnswer),
+        memory_citation: None,
+        delivery: Some(AgentMessageDelivery::Async),
+        questions: Some(questions),
+    })
 }
 
 impl CoreToolRuntime for RequestUserInputHandler {

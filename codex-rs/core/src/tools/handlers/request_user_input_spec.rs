@@ -1,4 +1,6 @@
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::protocol::SessionSource;
 use codex_protocol::request_user_input::RequestUserInputQuestion;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
@@ -8,12 +10,37 @@ use std::collections::BTreeMap;
 
 pub const REQUEST_USER_INPUT_TOOL_NAME: &str = "request_user_input";
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub(crate) struct RequestUserInputToolArgs {
-    pub questions: Vec<RequestUserInputQuestion>,
+pub(crate) fn request_user_input_async_available(
+    source: &SessionSource,
+    model: &ModelInfo,
+) -> bool {
+    !source.is_non_root_agent()
+        && model.experimental_supported_tools.iter().any(|tool| {
+            // Existing catalogs still use both names for the async question capability.
+            matches!(
+                tool.as_str(),
+                "request_user_input_async" | "send_user_message_async"
+            )
+        })
 }
 
-pub fn create_request_user_input_tool(description: String) -> ToolSpec {
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UserInputDelivery {
+    #[default]
+    Wait,
+    Async,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RequestUserInputToolArgs {
+    pub questions: Vec<RequestUserInputQuestion>,
+    #[serde(default)]
+    pub delivery: UserInputDelivery,
+}
+
+pub fn create_request_user_input_tool(description: String, async_enabled: bool) -> ToolSpec {
     let option_props = BTreeMap::from([
         (
             "label".to_string(),
@@ -25,19 +52,22 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
         ),
     ]);
 
-    let options_schema = JsonSchema::array(
+    let mut options_schema = JsonSchema::array(
         JsonSchema::object(
             option_props,
             Some(vec!["label".to_string(), "description".to_string()]),
             Some(false.into()),
         ),
-        Some("2-3 mutually exclusive choices; no Other, automatic free text".to_string()),
+        Some(
+            "Suggested choices; no Other, automatic free text; omit for free-text-only".to_string(),
+        ),
     );
+    options_schema.min_items = Some(1);
 
     let question_props = BTreeMap::from([
         (
             "id".to_string(),
-            JsonSchema::string(Some("Stable snake_case answer key".to_string())),
+            JsonSchema::string(Some("Wait answer key, snake_case".to_string())),
         ),
         (
             "header".to_string(),
@@ -45,26 +75,35 @@ pub fn create_request_user_input_tool(description: String) -> ToolSpec {
         ),
         (
             "question".to_string(),
-            JsonSchema::string(Some("One sentence".to_string())),
+            JsonSchema::string(Some("Self-contained question".to_string())),
         ),
         ("options".to_string(), options_schema),
     ]);
 
-    let questions_schema = JsonSchema::array(
+    let mut questions_schema = JsonSchema::array(
         JsonSchema::object(
             question_props,
             Some(vec![
                 "id".to_string(),
                 "header".to_string(),
                 "question".to_string(),
-                "options".to_string(),
             ]),
             Some(false.into()),
         ),
         Some("At most 3".to_string()),
     );
+    questions_schema.min_items = Some(1);
 
-    let properties = BTreeMap::from([("questions".to_string(), questions_schema)]);
+    let mut properties = BTreeMap::from([("questions".to_string(), questions_schema)]);
+    let deliveries = if async_enabled {
+        vec!["wait".into(), "async".into()]
+    } else {
+        vec!["wait".into()]
+    };
+    properties.insert(
+        "delivery".to_string(),
+        JsonSchema::string_enum(deliveries, Some("Default wait; async only while continuing other work; replies arrive as user messages".to_string())),
+    );
 
     ToolSpec::Function(ResponsesApiTool {
         name: REQUEST_USER_INPUT_TOOL_NAME.to_string(),
@@ -97,24 +136,37 @@ pub fn request_user_input_unavailable_message(
 pub(crate) fn normalize_request_user_input_tool_args(
     mut args: RequestUserInputToolArgs,
 ) -> Result<RequestUserInputToolArgs, String> {
-    let missing_options = args
-        .questions
-        .iter()
-        .any(|question| question.options.as_ref().is_none_or(Vec::is_empty));
-    if missing_options {
-        return Err("request_user_input requires non-empty options for every question".to_string());
+    if args.questions.is_empty() {
+        return Err("questions must not be empty".to_string());
     }
 
     for question in &mut args.questions {
+        if question.id.trim().is_empty() || question.question.trim().is_empty() {
+            return Err("question ids and text must not be empty".to_string());
+        }
+        if let Some(options) = &question.options
+            && (options.is_empty() || options.iter().any(|option| option.label.trim().is_empty()))
+        {
+            return Err("options must contain at least one non-empty answer".to_string());
+        }
         question.is_other = true;
     }
 
     Ok(args)
 }
 
-pub fn request_user_input_tool_description(available_modes: &[ModeKind]) -> String {
+pub fn request_user_input_tool_description(
+    available_modes: &[ModeKind],
+    async_enabled: bool,
+) -> String {
     let allowed_modes = format_allowed_modes(available_modes);
-    format!("Ask the user; wait for answers; {allowed_modes} only")
+    if async_enabled && available_modes.is_empty() {
+        "Ask the user; wait unavailable; async in any mode".to_string()
+    } else if async_enabled {
+        format!("Ask the user; wait in {allowed_modes}; async in any mode")
+    } else {
+        format!("Ask the user; wait for answers; {allowed_modes} only")
+    }
 }
 
 fn format_allowed_modes(available_modes: &[ModeKind]) -> String {

@@ -2570,9 +2570,13 @@ async fn turn_start_accepts_collaboration_mode_override_v2() -> Result<()> {
     Ok(())
 }
 
+#[test_case(true, "Default or Plan mode"; "default_enabled")]
+#[test_case(false, "Plan mode"; "default_disabled")]
 #[tokio::test]
-async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_description_v2()
--> Result<()> {
+async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_description_v2(
+    default_enabled: bool,
+    available_modes: &str,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -2584,7 +2588,11 @@ async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_de
     let response_mock = responses::mount_sse_once(&server, body).await;
 
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = \"compaction\"")
+        .disable_feature(Feature::CodeMode)
+        .disable_feature(Feature::CodeModeOnly)
+        .write(codex_home.path())?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -2596,7 +2604,7 @@ async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_de
             model: Some("gpt-5.4".to_string()),
             config: Some(HashMap::from([(
                 "features.default_mode_request_user_input".to_string(),
-                json!(true),
+                json!(default_enabled),
             )])),
             ..Default::default()
         })
@@ -2638,8 +2646,17 @@ async fn turn_start_uses_thread_feature_overrides_for_request_user_input_tool_de
     .await??;
 
     let request = response_mock.single_request();
-    let payload_text = request.body_json().to_string();
-    assert!(payload_text.contains("This tool is only available in Default or Plan mode."));
+    let payload = request.body_json();
+    let tool = payload["tools"]
+        .as_array()
+        .expect("tool schemas")
+        .iter()
+        .find(|tool| tool["name"] == "request_user_input")
+        .expect("direct question tool");
+    assert_eq!(
+        tool["description"],
+        format!("Ask the user; wait for answers; {available_modes} only")
+    );
 
     Ok(())
 }

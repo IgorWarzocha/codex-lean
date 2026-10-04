@@ -955,6 +955,7 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
         }
     }))?;
     let mut builder = test_codex()
+        .with_v8_runtime()
         .with_model_info_override("gpt-5.4", |model| {
             model.tool_mode = Some(codex_protocol::openai_models::ToolMode::CodeMode);
             model.experimental_supported_tools = vec!["test_sync_tool".to_string()];

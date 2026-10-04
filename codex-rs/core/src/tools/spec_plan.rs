@@ -49,6 +49,7 @@ use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHand
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
+use crate::tools::handlers::request_user_input_spec::request_user_input_async_available;
 use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -1209,40 +1210,30 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         );
     }
 
-    if turn_context.config.experimental_request_user_input_enabled {
+    let async_user_input_enabled =
+        request_user_input_async_available(&turn_context.session_source, context.model_info);
+    if turn_context.config.experimental_request_user_input_enabled || async_user_input_enabled {
         registry.add_with_exposure(
             RequestUserInputHandler {
-                available_modes: request_user_input_available_modes(features),
+                available_modes: if turn_context.config.experimental_request_user_input_enabled {
+                    request_user_input_available_modes(features)
+                } else {
+                    Vec::new()
+                },
+                async_enabled: async_user_input_enabled,
             },
-            ToolExposure::DirectModelOnly,
+            if matches!(
+                effective_tool_mode(turn_context, context.model_info),
+                ToolMode::CodeMode | ToolMode::CodeModeOnly
+            ) {
+                ToolExposure::CodeModeOnly
+            } else {
+                ToolExposure::Direct
+            },
         );
     }
-
-    if !turn_context.session_source.is_non_root_agent()
-        && context
-            .model_info
-            .experimental_supported_tools
-            .iter()
-            // Existing model catalogs still advertise the previous name.
-            .any(|tool| {
-                matches!(
-                    tool.as_str(),
-                    "request_user_input_async" | "send_user_message_async"
-                )
-            })
-    {
-        let model_messages = ResolvedModelMessages::from_model(context.model_info);
-        registry.add_with_exposure(
-            RequestUserInputAsyncHandler {
-                description: model_messages
-                    .request_user_input_async_description()
-                    .to_string(),
-                parameters: model_messages
-                    .request_user_input_async_parameters_override()
-                    .map(str::to_owned),
-            },
-            ToolExposure::DirectModelOnly,
-        );
+    if async_user_input_enabled {
+        registry.add_with_exposure(RequestUserInputAsyncHandler, ToolExposure::Hidden);
     }
 
     if !turn_context.session_source.is_non_root_agent()

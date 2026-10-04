@@ -2458,8 +2458,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                 assert!(namespace_child_tool(&body, "collaboration", "post").is_none());
                 json!({
                     "model": body["model"],
-                    "async_description": tool("request_user_input_async")["description"],
-                    "async_parameters": tool("request_user_input_async")["parameters"],
+                    "standalone_question_tool": body["tools"].as_array().expect("tools").iter().any(|tool| matches!(tool["name"].as_str(), Some("request_user_input" | "request_user_input_async"))),
                     "multi_agent_messages": multi_agent_messages,
                     "board_description": board["description"],
                     "board_required": board["parameters"]["required"],
@@ -2472,8 +2471,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
         [MODEL_A, MODEL_B]
             .map(|model| json!({
                 "model": model,
-                "async_description": format!("Async message description for {model}."),
-                "async_parameters": async_parameters(model),
+                "standalone_question_tool": false,
                 "multi_agent_messages": MULTI_AGENT_TOOLS
                     .map(|name| (name.to_string(), json!({
                         "description": format!("{name} description for {model}."),
@@ -2481,7 +2479,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                     })))
                     .into_iter()
                     .collect::<serde_json::Map<String, Value>>(),
-                "board_description": "Shared agent discussions. action=help lists actions; add topic for arguments\n\nexec tool declaration:\n```ts\ndeclare const tools: { collaboration__agent_board(args: { action: string; [key: string]: unknown; }): Promise<unknown>; };\n```\n\nInput schema: {\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"}},\"required\":[\"action\"],\"additionalProperties\":true}",
+                "board_description": "Shared agent discussions. action=help lists actions; add topic for arguments\n\nexec tool declaration:\n```ts\ndeclare const tools: { collaboration__agent_board(args: { action: string; [key: string]: unknown; }): Promise<unknown>; };\n```\n\nInput schema: {\"additionalProperties\":true,\"properties\":{\"action\":{\"type\":\"string\"}},\"required\":[\"action\"],\"type\":\"object\"}",
                 "board_required": ["action"],
                 "exec_description": format!("Exec description for {model}."),
                 "wait_description": format!("Wait description for {model}."),

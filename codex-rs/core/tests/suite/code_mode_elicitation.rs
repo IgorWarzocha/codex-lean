@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_core::config::Config;
+use codex_features::CodeModeRuntime;
 use codex_features::Feature;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -17,6 +18,8 @@ use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
+use codex_protocol::request_user_input::RequestUserInputAnswer;
+use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses;
 use core_test_support::responses::ResponseMock;
@@ -33,10 +36,95 @@ use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_event_with_timeout;
+use test_case::test_case;
 use wiremock::MockServer;
 
 const YIELD_TIME_MS: u64 = 1_000;
 const TURN_COMPLETE_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[test_case(CodeModeRuntime::Notebook; "notebook")]
+#[test_case(CodeModeRuntime::V8; "code_mode")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn code_mode_request_user_input_wait_round_trip(runtime: CodeModeRuntime) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let harness = CodeModeElicitationHarness::start(
+        r#"// @exec: {"yield_time_ms": 10000}
+const result = await tools.request_user_input({questions: [{id: "deadline", header: "Deadline", question: "What deadline should I use?"}]});
+text(result.answers.deadline.answers[0]);"#,
+        PermissionProfile::Disabled,
+        move |config| {
+            config.code_mode.runtime = runtime;
+            config.code_mode.disable_in_process_fallback = false;
+            config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
+        },
+    ).await?;
+    let request = wait_for_event_match(&harness.test.codex, |event| match event {
+        EventMsg::RequestUserInput(request) => Some(request.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(request.turn_id, harness.turn_id);
+    assert!(request.call_id.starts_with("exec-"));
+    assert!(!request.is_blocking);
+    assert!(request.questions[0].is_other);
+    assert!(request.questions[0].options.is_none());
+    harness.assert_result_held().await;
+    harness
+        .test
+        .codex
+        .submit(Op::UserInputAnswer {
+            id: request.turn_id,
+            response: RequestUserInputResponse {
+                answers: std::collections::HashMap::from([(
+                    "deadline".to_string(),
+                    RequestUserInputAnswer {
+                        answers: vec!["Friday".to_string()],
+                    },
+                )]),
+            },
+        })
+        .await?;
+    wait_for_event(&harness.test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let output = harness
+        .follow_up
+        .single_request()
+        .custom_tool_call_output("call-1")
+        .to_string();
+    assert!(output.contains("Friday"), "{output}");
+    assert!(!output.contains("Script error"), "{output}");
+    harness.test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn notebook_request_user_input_wait_is_interruptible() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let harness = CodeModeElicitationHarness::start(
+        r#"await tools.request_user_input({questions: [{id: "approval", header: "Approval", question: "Proceed?"}]}); text('SHOULD_NOT_RESUME');"#,
+        PermissionProfile::Disabled,
+        |config| {
+            config.code_mode.runtime = CodeModeRuntime::Notebook;
+            config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
+        },
+    ).await?;
+    wait_for_event(&harness.test.codex, |event| {
+        matches!(event, EventMsg::RequestUserInput(_))
+    })
+    .await;
+    harness.test.codex.submit(Op::Interrupt).await?;
+    wait_for_event_with_timeout(
+        &harness.test.codex,
+        |event| matches!(event, EventMsg::TurnAborted(_)),
+        TURN_COMPLETE_TIMEOUT,
+    )
+    .await;
+    assert!(harness.follow_up.requests().is_empty());
+    harness.test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
 
 struct CodeModeElicitationHarness {
     _server: MockServer,
@@ -52,13 +140,13 @@ impl CodeModeElicitationHarness {
         configure: impl FnOnce(&mut Config) + Send + 'static,
     ) -> Result<Self> {
         let server = responses::start_mock_server().await;
-        let mut builder =
-            test_codex()
-                .with_model("test-gpt-5.1-codex")
-                .with_config(move |config| {
-                    let _ = config.features.enable(Feature::CodeMode);
-                    configure(config);
-                });
+        let mut builder = test_codex()
+            .with_v8_runtime()
+            .with_model("test-gpt-5.1-codex")
+            .with_config(move |config| {
+                let _ = config.features.enable(Feature::CodeMode);
+                configure(config);
+            });
         let test = builder.build_with_auto_env(&server).await?;
         let follow_up = mount_code_mode_responses(&server, code).await;
         let turn_id = submit_turn(&test, permission_profile).await?;
