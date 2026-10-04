@@ -11,7 +11,7 @@ An unofficial fork of OpenAI Codex for long-running agent work. Persistent tools
 - **Voice follows the work.** Spoken progress and results, context refresh after rollover, and recovery from a dropped call. These changes belong to the CLI, not the ChatGPT desktop app.
 - **Your preferences, not a copied system prompt.** One `codex_personality.md` file sets the tone for text and voice. `/settings` exposes the fork's context, tool-runtime, and agent controls.
 
-[Notebook](docs/notebook.md) · [Context management](docs/config.md#context-continuity) · [Voice](docs/config.md#voice-continuity) · [Settings](docs/config.md)
+[Notebook](docs/notebook.md) · [Context management](docs/config.md#context-continuity) · [Skills](docs/skills.md) · [Voice](docs/config.md#voice-continuity) · [Settings](docs/config.md)
 
 ## Download
 
@@ -61,6 +61,8 @@ ChatGPT Desktop can use Lean as its Codex app-server backend, locally or over it
 Keep stock Codex installed. Give Lean its own package directory, `codex-lean` command, and `~/.codex-lean` home. Configure the GUI's backend selection, not just the executable's name. New Lean threads have separate settings and history. The CLI's voice changes do not replace ChatGPT Desktop's voice implementation.
 
 The [desktop and server setup guide](docs/desktop.md) covers installation, sign-in, local GUI launch, SSH routing, verification, updates, and rollback. The Linux setup has been verified with real desktop and laptop connections to the same server.
+
+Already have skills? [Copy them into Lean and organize them for on-demand loading](docs/skills.md#copy-existing-skills-into-lean). Flat packages remain supported. The guide preserves the originals and covers categories, reference files, and shared-source conflicts.
 
 To have an agent do the setup, give it this task:
 

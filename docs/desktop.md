@@ -47,6 +47,8 @@ Stock `codex` should still resolve to its original installation. Lean should rep
 
 Lean's home holds separate settings, threads, caches, and daemon sockets. Old stock conversations do not move into it. Start a new Lean thread for the first check.
 
+To bring existing skills across, [copy selected packages into Lean](skills.md#copy-existing-skills-into-lean). Leave the originals untouched. Shared `~/.agents/skills` and repository skills remain discoverable, so check those sources before assuming the catalogs are completely separate.
+
 Notebook requires full access. For a trusted execution host, set `sandbox_mode = "danger-full-access"` in `~/.codex-lean/config.toml` and select compatible permissions in the GUI. Do not overwrite existing configuration or silently expand permissions. To retain sandboxing, run `codex-lean settings set code-mode v8` instead. API-key users also need `codex-lean settings set context compaction`.
 
 ## Run the GUI locally
