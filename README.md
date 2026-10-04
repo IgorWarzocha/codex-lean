@@ -32,6 +32,22 @@ Linux voice requires glibc 2.28 or newer. macOS and Windows packages are not dev
 
 OpenAI's installers, npm package, and Homebrew package install upstream Codex, not this fork.
 
+## Bring your existing setup
+
+**We recommend a separate `~/.codex-lean` home, seeded with copies of your current Codex instructions, preferences, and skills.** Keep stock `~/.codex` untouched. Lean otherwise uses `~/.codex` too, so set `CODEX_HOME` on every Lean invocation, including login. The commands below use the separate home.
+
+Copy your home-level `AGENTS.md` and any `codex_personality.md` you use. Review and transfer the settings you want from `config.toml`, checking absolute paths and permission choices rather than overwriting Lean's configuration. Copy selected skill packages intact into `~/.codex-lean/skills`, including their references, scripts, and assets. Do not move the originals or symlink the two homes together. Sign in separately instead of copying credentials.
+
+**This carries over your setup, not a live conversation.** A fresh Lean home does not automatically inherit stock threads, history, or remembered context. Keep old conversations in stock Codex. For ongoing work, bring a written handoff into a new Lean thread with the goal, decisions, relevant paths, and next steps. Do not expect switching backends to resume the same working state.
+
+Skills have a few important quirks:
+
+- **Discovery is not loading.** Lean's `skills` tool lists and reads skills on demand instead of placing the full catalog in every session prompt.
+- **A separate home is not complete skill isolation.** Shared `~/.agents/skills`, repository skills, and enabled plugins can still contribute skills. Check the catalog from your actual project. Disable unwanted duplicate source paths in Lean's configuration without changing the originals.
+- **Categories are folders, not namespaces.** Flat packages work. A category folder must not contain its own `SKILL.md` unless it is itself a skill. Repository skills appear under `session`, and moving a package into a category does not resolve duplicate skill names.
+
+Follow the [skill-copying and verification guide](docs/skills.md#copy-existing-skills-into-lean), then confirm a fresh Lean thread reads the intended copies. The [side-by-side setup](docs/install.md#run-alongside-upstream-codex) covers a dedicated launcher.
+
 ## Start
 
 The default setup uses **ChatGPT sign-in for Notes** and **full access for Notebook**. Only use Notebook in a trusted local project: its code can access your filesystem, network, and subprocesses. Prefer a sandbox or use an API key? Follow the [alternative setup](docs/install.md#sandbox-and-api-key-setup) instead.
@@ -41,18 +57,19 @@ Open a terminal in the extracted package folder, sign in, then launch in your pr
 **Linux and macOS**
 
 ```sh
-./bin/codex login
-./bin/codex --sandbox danger-full-access --cd /path/to/project
+CODEX_HOME="$HOME/.codex-lean" ./bin/codex login
+CODEX_HOME="$HOME/.codex-lean" ./bin/codex --sandbox danger-full-access --cd /path/to/project
 ```
 
 **Windows PowerShell**
 
 ```powershell
+$env:CODEX_HOME = "$HOME\.codex-lean"
 .\bin\codex.exe login
 .\bin\codex.exe --sandbox danger-full-access --cd C:\path\to\project
 ```
 
-Use `/settings` inside Codex to change defaults. `codex settings` also works before starting a thread. To run `codex` from anywhere, add the package's `bin` directory to your `PATH`; don't move the executable out of its package.
+Use a terminal dedicated to Lean for the PowerShell commands so stock Codex does not inherit the Lean home. Use `/settings` inside Codex to change defaults. `codex settings` also works before starting a thread. For side-by-side use, create a [scoped `codex-lean` launcher](docs/desktop.md#install-on-the-machine-that-runs-the-work) rather than replacing stock `codex`. Keep the executable in its package.
 
 ## Use with ChatGPT Desktop
 
@@ -62,11 +79,9 @@ Keep stock Codex installed. Give Lean its own package directory, `codex-lean` co
 
 The [desktop and server setup guide](docs/desktop.md) covers installation, sign-in, local GUI launch, SSH routing, verification, updates, and rollback. The Linux setup has been verified with real desktop and laptop connections to the same server.
 
-Already have skills? [Copy them into Lean and organize them by category](docs/skills.md#copy-existing-skills-into-lean). Flat packages remain supported. The guide covers intact package copies, category directories, and shared-source conflicts without changing skill contents.
-
 To have an agent do the setup, give it this task:
 
-> Follow `docs/desktop.md` to install Codex Lean alongside my existing Codex and configure ChatGPT Desktop to use it. Inspect the installed app's supported backend overrides and my shell startup files first. Preserve stock Codex and its data. Use a separate Lean home and sign-in. For a remote setup, configure the execution server and verify the connection from each client. Prove the GUI handshake reaches the Lean version and home, then run a small tool task. Report the changed paths and how to switch back. Do not patch the desktop bundle or expose an unauthenticated network listener.
+> Follow `docs/desktop.md` to install Codex Lean alongside my existing Codex and configure ChatGPT Desktop to use it. Inspect the installed app's supported backend overrides and my shell startup files first. Preserve stock Codex and its data. Use a separate Lean home and sign-in. Copy my existing instructions, preferences, and selected intact skill packages into Lean, reviewing configuration paths and permissions. Follow `docs/skills.md` to verify discovery and shared-source conflicts without changing the originals. Explain what does not carry over, including old conversations and live working state. For a remote setup, configure the execution server and verify the connection from each client. Prove the GUI handshake reaches the Lean version and home, then run a small tool task. Report the changed paths and how to switch back. Do not patch the desktop bundle or expose an unauthenticated network listener.
 
 ## Updates and source builds
 
