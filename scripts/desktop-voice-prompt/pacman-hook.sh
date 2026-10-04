@@ -2,7 +2,7 @@
 # Python reports expected incompatibility. This boundary also handles startup
 # failures and timeouts without giving pacman or Omarchy a failed hook status.
 if /usr/bin/timeout --signal=INT --kill-after=5s 120s /usr/bin/python3 -E -s -B \
-  "$(/usr/bin/dirname "$0")/pacman_hook.py" --user "${1-}" --personality-file "${2-}"; then
+  "$(/usr/bin/dirname "$0")/git_update.py" --user "${1-}" --personality-file "${2-}"; then
   exit 0
 fi
 

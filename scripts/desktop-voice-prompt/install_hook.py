@@ -4,23 +4,18 @@
 import argparse
 import os
 import shlex
-import stat
 import sys
 import tempfile
 from pathlib import Path
 
 from pacman_hook import validate_personality
+from git_update import LIBRARY, PATCHER_SOURCES, trusted_directory
 
 
-LIBRARY = Path("/opt/codex-desktop-personality")
 HOOK = Path("/etc/pacman.d/hooks/95-codex-desktop-personality.hook")
 SOURCES = (
-    "asar.py",
-    "regions.py",
-    "patch.py",
-    "runtime-main.js",
-    "runtime-preload.js",
-    "pacman_hook.py",
+    *PATCHER_SOURCES,
+    "git_update.py",
     "pacman-hook.sh",
 )
 
@@ -38,22 +33,6 @@ def hook_text(user: str, personality: Path, library: Path = LIBRARY) -> str:
         "When = PostTransaction\n"
         f"Exec = {command}\n"
     )
-
-
-def trusted_directory(directory: Path) -> None:
-    # Root must never import hook code through a user-writable or symlinked tree.
-    for ancestor in reversed((directory, *directory.parents)):
-        if not ancestor.exists():
-            ancestor.mkdir(mode=0o755)
-        metadata = ancestor.lstat()
-        if (
-            not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != 0
-            or metadata.st_mode & 0o022
-        ):
-            raise ValueError(
-                f"hook directory is not root-owned and protected: {ancestor}"
-            )
 
 
 def publish(path: Path, data: bytes, mode: int) -> None:
@@ -97,7 +76,9 @@ def main(argv=None) -> int:
     except (OSError, ValueError, KeyError) as error:
         print(f"Cannot install hook: {error}", file=sys.stderr)
         return 1
-    print(f"Installed {HOOK}. Future app updates reapply preferences without backups.")
+    print(
+        f"Installed {HOOK}. Future app updates fetch the Git patcher and reapply preferences."
+    )
     return 0
 
 
