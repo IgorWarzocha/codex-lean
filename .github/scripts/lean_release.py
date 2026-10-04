@@ -79,6 +79,8 @@ def check() -> None:
                            os.environ["GITHUB_REF"], version, commit, os.environ["INPUT_PUBLISH"])
     scope = os.environ.get("INPUT_SCOPE") or "all"
     matrix = voice_matrix(scope, publish)
+    if scope == "all":
+        render_release_notes(version, commit)
     print(f"version={version}\ncommit={commit}\ntag=lean-v{version}\npublish={str(publish).lower()}")
     print(f"scope={scope}\nvoice_matrix={json.dumps(matrix, separators=(',', ':'))}")
 
@@ -231,28 +233,49 @@ def verify_assets(directory: Path, version: str, commit: str) -> str:
     return "".join(checksums)
 
 
+def render_release_notes(version: str, commit: str) -> str:
+    """Require this version's curated changes, then append download boundaries."""
+    validate_identity(version, commit)
+    source = REPO_ROOT / "docs/release-notes" / f"{version}.md"
+    if not source.is_file():
+        raise ValueError(f"Missing curated release notes: {source}")
+    curated = source.read_text(encoding="utf-8").strip()
+    if curated.splitlines()[:1] != [f"# Codex Lean {version}"]:
+        raise ValueError(f"Release notes title must match version {version}: {source}")
+    changes = re.search(r"^## Changes\n(.*?)(?=^## |\Z)", curated, re.MULTILINE | re.DOTALL)
+    if not changes or not re.search(r"^- \S", changes.group(1), re.MULTILINE):
+        raise ValueError(f"Release notes require user-facing bullets under '## Changes': {source}")
+    if re.search(r"\b(TODO|TBD|PLACEHOLDER)\b", curated, re.IGNORECASE):
+        raise ValueError(f"Replace release notes placeholders: {source}")
+    docs = f"https://github.com/{REPOSITORY}/blob/{commit}/docs"
+    return (
+        f"{curated}\n\n"
+        "## Downloads\n\n"
+        "Complete packages are available for Linux x64 and ARM64, Apple Silicon macOS, "
+        "and Windows x64. Keep the extracted package together. "
+        "Verify downloads with `SHA256SUMS` or the per-archive `.sha256` files.\n\n"
+        "Linux voice requires glibc 2.28 or newer. macOS and Windows packages are not "
+        "developer-signed. macOS is not notarized. Native voice passes CI runtime checks, "
+        "but CI does not test live microphone or speaker use. "
+        f"See [installation and platform requirements]({docs}/install.md) "
+        f"and [release validation]({docs}/releases.md).\n\n"
+        f"Built from [`{commit}`](https://github.com/{REPOSITORY}/commit/{commit}).\n"
+    )
+
+
+def notes() -> None:
+    """Render a body for review without building, tagging or publishing."""
+    body = render_release_notes(os.environ["RELEASE_VERSION"], os.environ["RELEASE_COMMIT"])
+    (REPO_ROOT / "lean-release-notes.md").write_text(body, encoding="utf-8")
+
+
 def verify() -> None:
     version, commit = os.environ["RELEASE_VERSION"], os.environ["RELEASE_COMMIT"]
+    body = render_release_notes(version, commit)
     directory = REPO_ROOT / "lean-dist"
     checksums = verify_assets(directory, version, commit)
     (directory / "SHA256SUMS").write_text(checksums, encoding="utf-8")
-    (REPO_ROOT / "lean-release-notes.md").write_text(
-        f"Codex Lean {version}, built from `{commit}`.\n\n"
-        "All four packages include an input-verified native voice helper and privately bundled "
-        "GStreamer audio runtime. CI verifies runtime initialization and plugin loading "
-        "without opening audio devices. Live microphone and speaker validation is separate.\n\n"
-        "Linux x64 and ARM64 CLIs use musl. Their native voice runtime requires glibc 2.28 "
-        "or newer. macOS ARM64 and Windows x64 packages "
-        "are unsigned. macOS is not notarized.\n\n"
-        "Packages include Codex, the code-mode host, sandbox helpers and ripgrep. "
-        "Patched zsh is included on Linux and macOS, not Windows. Keep the extracted "
-        "directories together and add `bin` to PATH.\n\n"
-        "Verify downloads with `SHA256SUMS` or the per-archive `.sha256` files. "
-        "The package and voice manifests record app and original voice source commits, "
-        "the exact native input fingerprint and file hashes. Unchanged native voice inputs "
-        "may reuse a validated helper from an earlier commit.\n",
-        encoding="utf-8",
-    )
+    (REPO_ROOT / "lean-release-notes.md").write_text(body, encoding="utf-8")
 
 
 def tag() -> None:
@@ -278,6 +301,6 @@ def tag() -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("check", "runner", "package", "verify", "tag"))
+    parser.add_argument("command", choices=("check", "runner", "package", "verify", "notes", "tag"))
     args = parser.parse_args()
-    {"check": check, "runner": runner, "package": package, "verify": verify, "tag": tag}[args.command]()
+    {"check": check, "runner": runner, "package": package, "verify": verify, "notes": notes, "tag": tag}[args.command]()

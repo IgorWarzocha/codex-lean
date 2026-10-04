@@ -19,6 +19,36 @@ Release tags use `lean-v<VERSION>`, for example `lean-v0.160.0-lean.1`.
 Never move a published tag or replace its assets. Use a new fork revision for a
 changed release.
 
+## Release notes
+
+Every full release build requires `docs/release-notes/<VERSION>.md` for the
+workspace version. Start with `# Codex Lean <VERSION>` and a `## Changes` section
+containing user-facing change bullets. Review those changes against the commits
+since the previous release. Explain what users can now do or which failure was
+fixed, not cache keys, packaging receipts, or CI implementation details. A
+packaging-only release should name its user-visible repair or compatibility change.
+
+Keep unchanged fork features separate from new changes. Do not copy a previous
+release's change list into a new version. The workflow rejects missing notes,
+mismatched titles, empty change lists, and TODO or TBD placeholders before full
+builds start. It checks the notes again before publication and never falls back
+to an earlier version. The Windows voice diagnostic scope does not require notes.
+Editorial review still owns the accuracy and usefulness of the bullets.
+
+The release script appends a short download and platform notice with links to
+installation and validation details at the release commit. To preview a body
+without building or publishing, set the exact version and source commit:
+
+```sh
+CODEX_REPO_ROOT="$PWD" RELEASE_VERSION=0.160.0-lean.2 \
+RELEASE_COMMIT=19e5ad36f344597a945f43d4e27cb33da0163682 \
+python .github/scripts/lean_release.py notes
+```
+
+Review the generated `lean-release-notes.md`. This command does not verify assets,
+create a tag, or publish a release. Published notes can be corrected without
+moving the tag or replacing its assets.
+
 ## Build and publish
 
 Run the **Codex Lean release** workflow from the repository's Actions page, selecting

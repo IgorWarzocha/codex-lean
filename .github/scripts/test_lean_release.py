@@ -2,6 +2,7 @@
 """Offline tests of the fork's release invariants, not native build coverage."""
 
 import io
+from contextlib import redirect_stdout
 import json
 import os
 import struct
@@ -61,6 +62,84 @@ class ReleaseRefTest(unittest.TestCase):
                 release.validate_ref(*args)
         with self.assertRaises(ValueError):
             release.validate_ref(release.REPOSITORY, "push", "refs/tags/lean-v0.160.0-lean.2", VERSION, COMMIT, "")
+
+
+class ReleaseNotesTest(unittest.TestCase):
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        root_patch = patch.object(release, "REPO_ROOT", self.root)
+        root_patch.start()
+        self.addCleanup(root_patch.stop)
+        self.source = self.root / "docs/release-notes" / f"{VERSION}.md"
+        self.source.parent.mkdir(parents=True)
+        self.curated = f"# Codex Lean {VERSION}\n\n## Changes\n\n- Parents resume when children finish.\n"
+        self.source.write_text(self.curated, encoding="utf-8")
+
+    def test_body_preserves_curated_changes_and_pins_doc_links_to_source_commit(self) -> None:
+        body = release.render_release_notes(VERSION, COMMIT)
+        self.assertTrue(body.startswith(self.curated))
+        self.assertIn(f"/blob/{COMMIT}/docs/install.md", body)
+        self.assertIn(f"/blob/{COMMIT}/docs/releases.md", body)
+        self.assertIn(f"/commit/{COMMIT}", body)
+        self.assertIn("glibc 2.28", body)
+        self.assertIn("not developer-signed", body)
+        self.assertIn("CI does not test live microphone", body)
+
+    def test_new_version_cannot_fall_back_to_previous_notes_or_copy_its_title(self) -> None:
+        next_version = "0.160.0-lean.2"
+        with self.assertRaisesRegex(ValueError, "Missing curated release notes"):
+            release.render_release_notes(next_version, COMMIT)
+        self.source.with_name(f"{next_version}.md").write_text(self.curated, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "title must match"):
+            release.render_release_notes(next_version, COMMIT)
+
+    def test_rejects_missing_empty_and_placeholder_changes(self) -> None:
+        for section in ("", "## Changes\n", "## Changes\n\n- \n",
+                        "## Changes\n\n## Features\n\n- Old features.\n",
+                        "## Changes\n\n- TODO\n", "## Changes\n\n- TBD\n",
+                        "## Changes\n\n- Placeholder\n"):
+            with self.subTest(section=section):
+                self.source.write_text(f"# Codex Lean {VERSION}\n\n{section}", encoding="utf-8")
+                with self.assertRaises(ValueError):
+                    release.render_release_notes(VERSION, COMMIT)
+
+    def test_check_blocks_full_builds_without_notes_but_allows_voice_diagnosis(self) -> None:
+        cargo = self.root / "codex-rs/Cargo.toml"
+        cargo.parent.mkdir()
+        cargo.write_text(f'[workspace.package]\nversion = "{VERSION}"\n', encoding="utf-8")
+        env = {"GITHUB_REPOSITORY": release.REPOSITORY, "GITHUB_EVENT_NAME": "workflow_dispatch",
+               "GITHUB_REF": "refs/heads/lean", "GITHUB_SHA": COMMIT, "INPUT_PUBLISH": "false",
+               "INPUT_SCOPE": "all"}
+        with patch.dict(os.environ, env), redirect_stdout(io.StringIO()) as output:
+            release.check()
+        self.assertIn(f"version={VERSION}\n", output.getvalue())
+        self.source.unlink()
+        for publish in ("false", "true"):
+            with self.subTest(publish=publish), patch.dict(os.environ, {**env, "INPUT_PUBLISH": publish}):
+                with redirect_stdout(io.StringIO()) as output:
+                    with self.assertRaisesRegex(ValueError, "Missing curated release notes"):
+                        release.check()
+                self.assertEqual(output.getvalue(), "")
+        with patch.dict(os.environ, {**env, "INPUT_SCOPE": "windows-voice"}):
+            with redirect_stdout(io.StringIO()) as output:
+                release.check()
+        self.assertIn("scope=windows-voice\n", output.getvalue())
+
+    def test_verify_requires_curated_notes_before_writing_outputs(self) -> None:
+        self.source.unlink()
+        with patch.dict(os.environ, {"RELEASE_VERSION": VERSION, "RELEASE_COMMIT": COMMIT}):
+            with self.assertRaisesRegex(ValueError, "Missing curated release notes"):
+                release.verify()
+        self.assertFalse((self.root / "lean-release-notes.md").exists())
+        self.assertFalse((self.root / "lean-dist/SHA256SUMS").exists())
+
+    def test_preview_writes_the_same_body_without_assets(self) -> None:
+        with patch.dict(os.environ, {"RELEASE_VERSION": VERSION, "RELEASE_COMMIT": COMMIT}):
+            release.notes()
+        self.assertEqual((self.root / "lean-release-notes.md").read_text(encoding="utf-8"),
+                         release.render_release_notes(VERSION, COMMIT))
 
 
 class ReleasePackageTest(unittest.TestCase):
@@ -221,6 +300,26 @@ class ReleasePackageTest(unittest.TestCase):
     @staticmethod
     def write_checksum(archive: Path) -> None:
         archive.with_name(archive.name + ".sha256").write_text(f"{release.sha256(archive)}  {archive.name}\n")
+
+    def test_verify_writes_curated_body_only_after_asset_validation(self) -> None:
+        directory = self.build_assets().rename(self.root / "lean-dist")
+        source = self.root / "docs/release-notes" / f"{VERSION}.md"
+        source.parent.mkdir(parents=True)
+        source.write_text(f"# Codex Lean {VERSION}\n\n## Changes\n\n- Parents resume.\n", encoding="utf-8")
+        env = {"RELEASE_VERSION": VERSION, "RELEASE_COMMIT": COMMIT}
+        with patch.object(release, "REPO_ROOT", self.root), patch.dict(os.environ, env):
+            archive = directory / release.archive_name(VERSION, release.TARGETS[0])
+            original = archive.read_bytes()
+            archive.write_bytes(original + b"corruption")
+            with self.assertRaisesRegex(ValueError, "Checksum"):
+                release.verify()
+            self.assertFalse((self.root / "lean-release-notes.md").exists())
+            self.assertFalse((directory / "SHA256SUMS").exists())
+            archive.write_bytes(original)
+            expected = release.render_release_notes(VERSION, COMMIT)
+            release.verify()
+        self.assertEqual((self.root / "lean-release-notes.md").read_text(encoding="utf-8"), expected)
+        self.assertEqual(len((directory / "SHA256SUMS").read_text(encoding="utf-8").splitlines()), 4)
 
     def test_verify_requires_all_platforms_matching_checksum_and_same_commit(self) -> None:
         directory = self.build_assets()
