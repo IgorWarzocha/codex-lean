@@ -62,7 +62,7 @@ Keep stock Codex installed. Give Lean its own package directory, `codex-lean` co
 
 The [desktop and server setup guide](docs/desktop.md) covers installation, sign-in, local GUI launch, SSH routing, verification, updates, and rollback. The Linux setup has been verified with real desktop and laptop connections to the same server.
 
-Already have skills? [Copy them into Lean and organize them for on-demand loading](docs/skills.md#copy-existing-skills-into-lean). Flat packages remain supported. The guide preserves the originals and covers categories, reference files, and shared-source conflicts.
+Already have skills? [Copy them into Lean and organize them by category](docs/skills.md#copy-existing-skills-into-lean). Flat packages remain supported. The guide covers intact package copies, category directories, and shared-source conflicts without changing skill contents.
 
 To have an agent do the setup, give it this task:
 

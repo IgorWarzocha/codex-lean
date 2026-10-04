@@ -4,20 +4,21 @@ Codex discovers skills through its native configured sources. The `skills` tool 
 
 ## Copy existing skills into Lean
 
-**Copy, do not move.** Keep the original skills and their configuration unchanged. Work only on the copies under `~/.codex-lean/skills`, using the isolated home from the [desktop setup guide](desktop.md). Do not symlink the skill trees together: editing a linked skill would also change the original.
+**Copy intact packages, do not move or rewrite them.** Keep the original skills and their configuration unchanged. Place independent copies under `~/.codex-lean/skills`, using the isolated home from the [desktop setup guide](desktop.md). Preserve every package's contents and internal directory layout. Do not symlink the skill trees together.
 
-Flat skill packages already work. Categorizing them is optional. A long `SKILL.md` also works without conversion; split it only when separate references make the instructions easier to load on demand.
+Flat skill packages already work. Categorizing them is optional and changes only where the complete package lives, not its instructions or internal organization.
 
 For example, copy this existing package:
 
 ```text
 ~/.codex/skills/deploy/
   SKILL.md
+  references/checks.md
   scripts/check.sh
   assets/template.yaml
 ```
 
-Then organize and edit only the Lean copy:
+Place the unchanged copy under a category directory:
 
 ```text
 ~/.codex-lean/skills/
@@ -25,9 +26,7 @@ Then organize and edit only the Lean copy:
   operations/
     deploy/
       SKILL.md
-      references/
-        checks.md
-        rollback.md
+      references/checks.md
       scripts/check.sh
       assets/template.yaml
 ```
@@ -56,26 +55,7 @@ shutil.copytree(source, destination)
 PY
 ```
 
-The same approach works for a selected package from another agent's skill directory. Copying instructions does not install that agent's extensions or make its tool names available in Lean. Review tool calls, absolute paths, dependencies, and script permissions in the copy. Do not execute imported scripts just to discover what they do. If the destination already exists, compare it with the source before deciding which edits to bring across; do not merge or overwrite it blindly.
-
-### Make the copy lean
-
-Keep valid YAML frontmatter. A useful entry point has a stable name, a short description saying when to load it, and the instructions needed on every use:
-
-```markdown
----
-name: deploy
-description: "Use before deploying a service or planning its rollback."
----
-
-Read `references/checks.md` before deployment.
-Read `references/rollback.md` before changing a running release.
-Confirm the target environment and the rollback plan before making changes.
-```
-
-Keep the original operational rules and failure handling. Transfer branch-specific detail from the copied `SKILL.md` into the copy's `references/` files, leaving explicit instructions for when to read each one. References are not automatically loaded just because they exist. Small skills can stay in one file.
-
-Preserve package-relative paths when copying. When splitting a document, fix links whose location changed. Replace absolute paths that still point to the original package. Do not duplicate every reference back into the entry point, and do not rename the skill merely because its category changed.
+The same approach works for a selected package from another skill directory. If the destination already exists, compare the two packages and resolve which copy to keep before proceeding. Do not merge or overwrite it blindly. Preserve file permissions and package-relative paths, and do not rename the skill merely because its category changed.
 
 ### Check shared sources and verify
 
@@ -91,9 +71,9 @@ enabled = false
 
 Do not disable by name when both copies have that name. Do not remove the shared original. For repository-specific instructions, check the catalog from the actual project rather than assuming a global catalog describes every session.
 
-Start a fresh Lean thread after copying. Ask the agent to list the relevant category, read the copied skill, and read one qualified reference. Confirm that the reported source paths point into the Lean copy and that referenced scripts and assets exist. Compare the originals before and after to confirm they were not changed. A representative task can then check that the skill loads for the right situation; it need not perform a real deployment.
+Compare the copied file inventory and hashes with the source to confirm that the complete package arrived unchanged. Compare the originals before and after to confirm they were not changed either. Start a fresh Lean thread, list the relevant category, and read the copied skill. Confirm that its reported source path points into the Lean copy.
 
-An agent doing this migration should inventory the selected packages, copy without clobbering destinations, reorganize only the copies, check shared-source collisions, and report copied paths and any instructions it adapted. It should not move, delete, rewrite, or link the originals.
+An agent doing this migration should inventory the selected packages, copy them intact into the chosen category directories without clobbering destinations, verify discovery and shared-source collisions, and report the source and destination paths. It should not move, delete, rewrite, split, or otherwise edit any skill contents, including those in the copies.
 
 ## Load skills on demand
 
