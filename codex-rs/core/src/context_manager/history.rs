@@ -489,13 +489,39 @@ impl ContextManager {
             .map(|snapshot| WorldStateItem::full(snapshot.into_object()))
     }
 
-    pub(crate) fn set_token_usage_full(&mut self, context_window: i64) {
+    pub(crate) fn set_token_usage_full(
+        &mut self,
+        context_window: i64,
+        reported_window: Option<i64>,
+    ) {
         match &mut self.token_info {
             Some(info) => info.fill_to_context_window(context_window),
             None => {
                 self.token_info = Some(TokenUsageInfo::full_context_window(context_window));
             }
         }
+        if let Some(info) = &mut self.token_info {
+            info.model_context_window = reported_window;
+        }
+    }
+
+    /// Backend overflow marks Notes admission exhausted, without inflating the
+    /// displayed working budget or discarding already observed usage.
+    pub(crate) fn set_token_usage_overflow(
+        &mut self,
+        execution_window: i64,
+        reported_window: Option<i64>,
+    ) {
+        let info = self.token_info.get_or_insert_with(|| TokenUsageInfo {
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            model_context_window: reported_window,
+        });
+        info.model_context_window = reported_window;
+        info.total_token_usage.total_tokens =
+            info.total_token_usage.total_tokens.max(execution_window);
+        info.last_token_usage.total_tokens =
+            info.last_token_usage.total_tokens.max(execution_window);
     }
 
     /// `items` is ordered from oldest to newest.

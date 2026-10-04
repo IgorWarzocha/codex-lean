@@ -210,6 +210,7 @@ use crate::codex_thread::ThreadConfigSnapshot;
 use crate::compact::collect_user_messages;
 use crate::config::Config;
 use crate::config::ConstraintResult;
+use crate::config::ContextStrategy;
 use crate::config::PermissionProfileSnapshot;
 use crate::config::PermissionProfileState;
 use crate::config::StartedNetworkProxy;
@@ -4890,10 +4891,7 @@ impl Session {
         token_usage: Option<&TokenUsage>,
     ) -> CodexResult<()> {
         if let Some(token_usage) = token_usage {
-            let model_context_window = context_window::execution_context_window(
-                turn_context.config.context_strategy,
-                &settings.model_info,
-            );
+            let model_context_window = settings.model_info.resolved_context_window();
             let token_info = {
                 let mut state = self.state.lock().await;
                 state.update_token_info_from_usage(token_usage, model_context_window);
@@ -4964,10 +4962,7 @@ impl Session {
                 codex_rollout_budget_units: None,
             };
 
-            if let Some(model_context_window) = context_window::execution_context_window(
-                turn_context.config.context_strategy,
-                model_info,
-            ) {
+            if let Some(model_context_window) = model_info.resolved_context_window() {
                 info.model_context_window = Some(model_context_window);
             }
 
@@ -5034,7 +5029,13 @@ impl Session {
             model_info,
         ) {
             let mut state = self.state.lock().await;
-            state.set_token_usage_full(context_window);
+            match turn_context.config.context_strategy {
+                ContextStrategy::Notes => state
+                    .set_token_usage_overflow(context_window, model_info.resolved_context_window()),
+                ContextStrategy::Compaction => {
+                    state.set_token_usage_full(context_window, model_info.resolved_context_window())
+                }
+            }
         }
         self.send_token_count_event(turn_context).await;
     }

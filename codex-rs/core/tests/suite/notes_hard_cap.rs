@@ -89,40 +89,55 @@ async fn complete(test: &TestCodex, text: &str) -> Result<TurnCompleteEvent> {
     Ok(completion)
 }
 
-#[test_case(ContextStrategy::Notes, 828_400; "notes_execution_ceiling")]
-#[test_case(ContextStrategy::Compaction, 258_400; "compaction_selected_ceiling")]
+#[test_case(ContextStrategy::Notes, 272_000; "notes_selected_window")]
+#[test_case(ContextStrategy::Notes, 123_456; "notes_custom_window")]
+#[test_case(ContextStrategy::Compaction, 272_000; "compaction_selected_window")]
+#[test_case(ContextStrategy::Compaction, 123_456; "compaction_custom_window")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn context_events_report_execution_ceiling(
+async fn context_events_report_selected_budget_independently_of_admission(
     strategy: ContextStrategy,
-    ceiling: i64,
+    selected: i64,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    mount_sse_sequence(
-        &server,
+    let notes = strategy == ContextStrategy::Notes;
+    let usage = if notes { selected + 1_000 } else { 10_000 };
+    let replies = if notes {
+        vec![
+            sse(vec![
+                ev_function_call("reset", "new_context", "{}"),
+                ev_completed_with_tokens("reset", usage),
+            ]),
+            sse(vec![
+                ev_assistant_message("final", "done after checkpoint"),
+                ev_completed_with_tokens("final", 10_000),
+            ]),
+        ]
+    } else {
         vec![sse(vec![
             ev_assistant_message("final", "done"),
-            ev_completed_with_tokens("final", 10_000),
-        ])],
-    )
-    .await;
+            ev_completed_with_tokens("final", usage),
+        ])]
+    };
+    let responses = mount_sse_sequence(&server, replies).await;
     let test = notes_fixture(AutoCompactTokenLimitScope::Total)
         .with_context_strategy(strategy)
         .with_model_info_override("gpt-5.2", |model| {
             model.max_context_window = Some(872_000);
             model.effective_context_window_percent = 95;
         })
-        .with_config(|config| config.model_context_window = Some(272_000))
+        .with_config(move |config| config.model_context_window = Some(selected))
         .build(&server)
         .await?;
     test.codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Report this request's context ceiling".into(),
+            text: "Save a notes checkpoint and report this request's context budget".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
     let mut started_window = None;
     let mut usage_window = None;
+    let mut saw_usage = false;
     loop {
         let event = wait_for_event(&test.codex, |event| {
             matches!(
@@ -136,7 +151,8 @@ async fn context_events_report_execution_ceiling(
             EventMsg::TokenCount(event) => {
                 if let Some(info) = event.info {
                     usage_window = info.model_context_window;
-                    assert_eq!(info.last_token_usage.total_tokens, 10_000);
+                    assert_eq!(usage_window, Some(selected));
+                    saw_usage |= info.last_token_usage.total_tokens == usage;
                 }
             }
             EventMsg::TurnComplete(event) => {
@@ -146,8 +162,25 @@ async fn context_events_report_execution_ceiling(
             _ => unreachable!("filtered context events"),
         }
     }
-    assert_eq!(started_window, Some(ceiling));
-    assert_eq!(usage_window, Some(ceiling));
+    assert_eq!(started_window, Some(selected));
+    assert_eq!(usage_window, Some(selected));
+    assert!(
+        saw_usage,
+        "actual usage must not be clamped to the display budget"
+    );
+    let requests = responses.requests();
+    assert_eq!(requests.len(), if notes { 2 } else { 1 });
+    assert!(
+        !requests
+            .iter()
+            .any(|request| request.body_contains_text(SUMMARIZATION_PROMPT))
+    );
+    if notes {
+        assert_ne!(
+            requests[0].header("x-codex-window-id"),
+            requests[1].header("x-codex-window-id")
+        );
+    }
     test.codex.shutdown_and_wait().await?;
     Ok(())
 }

@@ -25,8 +25,7 @@ fn tokens_remaining(limit: Option<i64>, used: i64) -> Option<i64> {
     limit.map(|limit| limit.saturating_sub(used).max(0))
 }
 
-/// The execution ceiling shared by admission and user-visible usage reporting.
-/// Notes reminder and checkpoint budgets remain tied to the selected window.
+/// Admission ceiling, independent of the selected working budget shown in Notes.
 pub(crate) fn execution_context_window(
     strategy: ContextStrategy,
     model_info: &ModelInfo,

@@ -2344,6 +2344,7 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_v8_runtime()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -3518,6 +3519,7 @@ async fn body_after_prefix_model_switch_budget_compacts_with_next_model() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut builder = test_codex()
+        .with_v8_runtime()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -3612,6 +3614,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut initial_builder = test_codex()
+        .with_v8_runtime()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
@@ -3655,6 +3658,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
 
     let model_provider = non_openai_model_provider(&server);
     let mut resumed_builder = test_codex()
+        .with_v8_runtime()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {

@@ -149,9 +149,12 @@ the maximum, the urgent reminder arrives earlier to leave room for checkpointing
 These thresholds follow model metadata and the selected window, not fixed GPT
 window sizes. Ordinary compaction keeps its existing thresholds.
 
-The CLI and desktop context indicators report the execution ceiling. In Notes
-mode, checkpoint reminders can therefore arrive before that displayed window is
-full. Changing the reported ceiling does not change the selected working budget.
+The CLI and desktop context indicators show the raw selected working budget in
+either strategy. A configured 272,000-token window displays 272,000, not the 258,400
+usable tokens or the 828,400 Notes execution ceiling. In Notes mode, usage can
+exceed the displayed budget while the agent saves notes and calls `new_context`.
+The fresh context keeps the selected budget. Admission headroom and ordinary
+compaction thresholds are unchanged.
 
 Idle rollover is optional and disabled when the setting is absent. To reset a
 notes window before the next user turn after 25 minutes idle:

@@ -847,6 +847,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
     });
     let backend_base_url = format!("{}/backend-api/codex", server.uri());
     let mut builder = test_codex()
+        .with_direct_tools()
         .with_auth(auth)
         .with_pre_build_hook(move |home| {
             fs::write(
@@ -1095,7 +1096,7 @@ async fn guardian_session_prewarms_and_is_reused_for_first_review(
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(guardian_context_windows, vec![Some(258_400)]);
+    assert_eq!(guardian_context_windows, vec![Some(272_000)]);
     for handshake in server.handshakes() {
         let is_guardian = handshake.header("x-openai-subagent").as_deref() == Some("guardian");
         let is_guardian_request = credits_enabled && is_guardian;

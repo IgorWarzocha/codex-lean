@@ -3408,6 +3408,7 @@ async fn token_count_includes_rate_limits_snapshot() {
     provider.supports_websockets = false;
 
     let mut builder = test_codex()
+        .with_v8_runtime()
         .with_auth(CodexAuth::from_api_key("test"))
         .with_config(move |config| {
             config.model_provider = provider;
@@ -3457,8 +3458,8 @@ async fn token_count_includes_rate_limits_snapshot() {
                     "reasoning_output_tokens": 0,
                     "total_tokens": 123
                 },
-                // Default model is gpt-5.4 in tests → 95% usable context window
-                "model_context_window": 258400
+                // Report the default model's selected window, without subtracting headroom.
+                "model_context_window": 272000
             },
             "rate_limits": {
                 "limit_id": "codex",
@@ -3632,6 +3633,7 @@ async fn context_window_error_sets_total_tokens_to_model_window() -> anyhow::Res
     .await;
 
     let TestCodex { codex, .. } = test_codex()
+        .with_v8_runtime()
         .with_config(|config| {
             config.model = Some("gpt-5.4".to_string());
             config.model_context_window = Some(272_000);
@@ -3660,8 +3662,7 @@ async fn context_window_error_sets_total_tokens_to_model_window() -> anyhow::Res
             event,
             EventMsg::TokenCount(payload)
                 if payload.info.as_ref().is_some_and(|info| {
-                    info.model_context_window == Some(info.total_token_usage.total_tokens)
-                        && info.total_token_usage.total_tokens > 0
+                    info.total_token_usage.total_tokens == EFFECTIVE_CONTEXT_WINDOW
                 })
         )
     })
@@ -3675,7 +3676,7 @@ async fn context_window_error_sets_total_tokens_to_model_window() -> anyhow::Res
         .info
         .expect("token usage info present when context window is exceeded");
 
-    assert_eq!(info.model_context_window, Some(EFFECTIVE_CONTEXT_WINDOW));
+    assert_eq!(info.model_context_window, Some(272_000));
     assert_eq!(
         info.total_token_usage.total_tokens,
         EFFECTIVE_CONTEXT_WINDOW

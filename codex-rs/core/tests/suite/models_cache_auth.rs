@@ -118,9 +118,10 @@ async fn auth_rotation_refreshes_before_turn_with_best_effort(
         .find(|model| model.slug == "gpt-5.5")
         .cloned()
         .expect("bundled model");
-    let fallback_context_window = model.usable_context_window();
+    let fallback_context_window = model.resolved_context_window();
     responses::mount_models_once(&server, catalog).await;
     let test = test_codex()
+        .with_v8_runtime()
         .with_auth(header_auth("Bearer rotated"))
         .with_model(&model.slug)
         .with_config(|config| config.model_provider.request_max_retries = Some(0))
@@ -135,7 +136,7 @@ async fn auth_rotation_refreshes_before_turn_with_best_effort(
     let succeeds = matches!(outcome, RefreshOutcome::Success);
     let stalls_auth = matches!(outcome, RefreshOutcome::AuthTimeout);
     let expected_context_window = if succeeds {
-        model.usable_context_window()
+        model.resolved_context_window()
     } else {
         fallback_context_window
     };

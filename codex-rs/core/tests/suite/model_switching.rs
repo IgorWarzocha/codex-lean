@@ -1238,9 +1238,6 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     let large_context_window = 272_000;
     let smaller_context_window = 128_000;
     let effective_context_window_percent = 95;
-    let large_effective_window = (large_context_window * effective_context_window_percent) / 100;
-    let smaller_effective_window =
-        (smaller_context_window * effective_context_window_percent) / 100;
 
     let base_model = ModelInfo {
         slug: large_model_slug.to_string(),
@@ -1324,6 +1321,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     .await;
 
     let mut builder = test_codex()
+        .with_v8_runtime()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some(large_model_slug.to_string());
@@ -1385,7 +1383,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
             .info
             .as_ref()
             .and_then(|info| info.model_context_window),
-        Some(large_effective_window)
+        Some(large_context_window)
     );
     wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -1413,7 +1411,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         matches!(
             event,
             EventMsg::TurnStarted(started)
-                if started.model_context_window == Some(smaller_effective_window)
+                if started.model_context_window == Some(smaller_context_window)
         )
     })
     .await;
@@ -1422,7 +1420,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
     };
     assert_eq!(
         smaller_turn_started.model_context_window,
-        Some(smaller_effective_window)
+        Some(smaller_context_window)
     );
 
     let smaller_window_event = wait_for_event(&test.codex, |event| {
@@ -1443,8 +1441,8 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         .info
         .as_ref()
         .and_then(|info| info.model_context_window);
-    assert_eq!(smaller_window, Some(smaller_effective_window));
-    assert_ne!(smaller_window, Some(large_effective_window));
+    assert_eq!(smaller_window, Some(smaller_context_window));
+    assert_ne!(smaller_window, Some(large_context_window));
     wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     Ok(())

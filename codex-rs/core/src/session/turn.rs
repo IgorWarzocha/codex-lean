@@ -1493,10 +1493,13 @@ async fn maybe_run_previous_model_inline_compact(
         return Ok(());
     }
 
-    let Some(old_context_window) = previous_model_turn_context.model_context_window() else {
+    let Some(old_context_window) = previous_model_turn_context
+        .model_info()
+        .usable_context_window()
+    else {
         return Ok(());
     };
-    let Some(new_context_window) = turn_context.model_context_window() else {
+    let Some(new_context_window) = turn_context.model_info().usable_context_window() else {
         return Ok(());
     };
     let active_context_tokens = sess.get_total_token_usage().await;
