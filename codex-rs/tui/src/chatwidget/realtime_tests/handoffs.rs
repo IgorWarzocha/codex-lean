@@ -180,7 +180,7 @@ async fn delegation_started_before_peer_connection_keeps_its_voice_origin() {
 }
 
 #[tokio::test]
-async fn delegated_async_question_stays_local_and_expires_when_its_turn_ends() {
+async fn delegated_async_question_stays_local_and_answerable_after_success() {
     let (mut chat, _sender, _events, mut ops) = make_chatwidget_manual_with_sender().await;
     let thread_id = activate_voice(&mut chat);
     let turn_id = "question-turn";
@@ -223,7 +223,7 @@ async fn delegated_async_question_stays_local_and_expires_when_its_turn_ends() {
             .questions
             .as_ref()
             .map(|editor| editor.unanswered_count()),
-        Some(0)
+        Some(1)
     );
     assert!(
         ops.try_recv().is_err(),

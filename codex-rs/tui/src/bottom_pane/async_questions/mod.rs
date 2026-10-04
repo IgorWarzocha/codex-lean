@@ -1,6 +1,7 @@
 //! Inline editing for asynchronous questions. Legacy request_user_input keeps its own overlay.
 //! Local submissions and committed desktop replies remove questions; arrival never steals focus.
-//! Live turn completion recovers unsent typed drafts before removing pending questions.
+//! Successful turns retain questions and editor focus. Failed or interrupted turns recover
+//! unsent typed drafts before removing pending questions.
 
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::CancellationEvent;

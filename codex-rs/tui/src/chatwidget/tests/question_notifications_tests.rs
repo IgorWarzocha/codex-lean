@@ -100,12 +100,16 @@ async fn async_question_notification_summarizes_batches_and_bounds_long_titles()
 }
 
 #[tokio::test]
-async fn async_question_notification_expires_when_turn_ends() {
+async fn async_question_notification_survives_success_but_expires_on_abort() {
     let mut outcomes = Vec::new();
-    for (status, expected) in [
-        (AppServerTurnStatus::Completed, Some("Agent turn complete")),
-        (AppServerTurnStatus::Interrupted, None),
-        (AppServerTurnStatus::Failed, None),
+    for (status, expected, count) in [
+        (
+            AppServerTurnStatus::Completed,
+            Some("Question: Which way?"),
+            1,
+        ),
+        (AppServerTurnStatus::Interrupted, None, 0),
+        (AppServerTurnStatus::Failed, None, 0),
     ] {
         let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
         handle_turn_started(&mut chat, "turn");
@@ -135,7 +139,7 @@ async fn async_question_notification_expires_when_turn_ends() {
                     .map(Notification::display),
                 chat.bottom_pane.question_editor().unanswered_count(),
             ),
-            (expected.map(str::to_string), 0),
+            (expected.map(str::to_string), count),
         );
         outcomes.push((
             status,

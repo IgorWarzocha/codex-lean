@@ -478,9 +478,8 @@ impl ChatWidget {
                 {
                     self.speak_completed_realtime_delegation(&notification.turn.id, item);
                 }
-                if replay_kind.is_none() {
-                    question_drafts = self.take_question_drafts();
-                }
+                // Successful completion leaves async questions and their editor drafts
+                // answerable. An idle answer uses the ordinary question-answer turn route.
                 self.last_non_retry_error = None;
                 let completion = self.completion_cell(&notification.turn, replay_kind);
                 self.on_task_complete(
