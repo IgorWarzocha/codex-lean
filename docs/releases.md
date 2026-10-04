@@ -58,6 +58,10 @@ has built, packaged, and passed its smoke checks. The release tag identifies the
 commit that was built, not whichever commit happens to be latest when the jobs
 finish.
 
+After publication succeeds, update the README's release version and download
+links against the published assets. Remove any source-only caveat for fixes now
+included in that release. Do not advertise a download before its assets exist.
+
 With GitHub CLI:
 
 ```sh

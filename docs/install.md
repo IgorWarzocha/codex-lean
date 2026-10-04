@@ -62,12 +62,11 @@ These settings persist for new threads. They do not convert an already-running t
 Codex Lean uses `~/.codex` unless `CODEX_HOME` is set. To keep separate sign-in, settings, history, and caches, use a different home on **every** invocation, including login:
 
 ```sh
-export CODEX_HOME="$HOME/.codex-lean"
-./bin/codex login
-./bin/codex --sandbox danger-full-access --cd /path/to/project
+CODEX_HOME="$HOME/.codex-lean" ./bin/codex login
+CODEX_HOME="$HOME/.codex-lean" ./bin/codex --sandbox danger-full-access --cd /path/to/project
 ```
 
-In PowerShell, set `$env:CODEX_HOME = "$HOME\.codex-lean"` before the equivalent commands. Set the variable in your shell configuration if you want it to persist across terminals.
+In PowerShell, set `$env:CODEX_HOME = "$HOME\.codex-lean"` in a terminal dedicated to Lean before the equivalent commands. Do not export the Lean home globally if you also run stock Codex. Use a scoped launcher instead. The [desktop setup guide](desktop.md) shows a `codex-lean` launcher and how to use Lean through a local GUI or an SSH-connected server.
 
 ## Update or remove
 
