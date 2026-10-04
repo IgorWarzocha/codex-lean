@@ -1838,7 +1838,8 @@ async fn run_sampling_request(
             }
             Err(err) => match err.details() {
                 CodexErrorDetails::ContextWindowExceeded => {
-                    sess.set_total_tokens_full(&turn_context).await;
+                    sess.set_total_tokens_full(&turn_context, &step_context.settings.model_info)
+                        .await;
                     return Err(err);
                 }
                 CodexErrorDetails::UsageLimitReached(e) => {

@@ -149,6 +149,10 @@ the maximum, the urgent reminder arrives earlier to leave room for checkpointing
 These thresholds follow model metadata and the selected window, not fixed GPT
 window sizes. Ordinary compaction keeps its existing thresholds.
 
+The CLI and desktop context indicators report the execution ceiling. In Notes
+mode, checkpoint reminders can therefore arrive before that displayed window is
+full. Changing the reported ceiling does not change the selected working budget.
+
 Idle rollover is optional and disabled when the setting is absent. To reset a
 notes window before the next user turn after 25 minutes idle:
 

@@ -25,6 +25,18 @@ fn tokens_remaining(limit: Option<i64>, used: i64) -> Option<i64> {
     limit.map(|limit| limit.saturating_sub(used).max(0))
 }
 
+/// The execution ceiling shared by admission and user-visible usage reporting.
+/// Notes reminder and checkpoint budgets remain tied to the selected window.
+pub(crate) fn execution_context_window(
+    strategy: ContextStrategy,
+    model_info: &ModelInfo,
+) -> Option<i64> {
+    match strategy {
+        ContextStrategy::Notes => model_info.notes_execution_context_window(),
+        ContextStrategy::Compaction => model_info.usable_context_window(),
+    }
+}
+
 pub(crate) async fn context_window_token_status(
     sess: &Session,
     turn_context: &TurnContext,
@@ -100,11 +112,7 @@ async fn context_window_token_status_with_config(
         };
 
     let notes = config.context_strategy == ContextStrategy::Notes;
-    let full_context_window_limit = if notes {
-        model_info.notes_execution_context_window()
-    } else {
-        model_info.usable_context_window()
-    };
+    let full_context_window_limit = execution_context_window(config.context_strategy, model_info);
 
     // Report remaining tokens against the base (unbuffered) window, capped by the full context.
     let base_window_tokens_remaining = [

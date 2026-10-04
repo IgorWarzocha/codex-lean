@@ -89,6 +89,69 @@ async fn complete(test: &TestCodex, text: &str) -> Result<TurnCompleteEvent> {
     Ok(completion)
 }
 
+#[test_case(ContextStrategy::Notes, 828_400; "notes_execution_ceiling")]
+#[test_case(ContextStrategy::Compaction, 258_400; "compaction_selected_ceiling")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn context_events_report_execution_ceiling(
+    strategy: ContextStrategy,
+    ceiling: i64,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    mount_sse_sequence(
+        &server,
+        vec![sse(vec![
+            ev_assistant_message("final", "done"),
+            ev_completed_with_tokens("final", 10_000),
+        ])],
+    )
+    .await;
+    let test = notes_fixture(AutoCompactTokenLimitScope::Total)
+        .with_context_strategy(strategy)
+        .with_model_info_override("gpt-5.2", |model| {
+            model.max_context_window = Some(872_000);
+            model.effective_context_window_percent = 95;
+        })
+        .with_config(|config| config.model_context_window = Some(272_000))
+        .build(&server)
+        .await?;
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Report this request's context ceiling".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    let mut started_window = None;
+    let mut usage_window = None;
+    loop {
+        let event = wait_for_event(&test.codex, |event| {
+            matches!(
+                event,
+                EventMsg::TurnStarted(_) | EventMsg::TokenCount(_) | EventMsg::TurnComplete(_)
+            )
+        })
+        .await;
+        match event {
+            EventMsg::TurnStarted(event) => started_window = event.model_context_window,
+            EventMsg::TokenCount(event) => {
+                if let Some(info) = event.info {
+                    usage_window = info.model_context_window;
+                    assert_eq!(info.last_token_usage.total_tokens, 10_000);
+                }
+            }
+            EventMsg::TurnComplete(event) => {
+                assert!(event.error.is_none());
+                break;
+            }
+            _ => unreachable!("filtered context events"),
+        }
+    }
+    assert_eq!(started_window, Some(ceiling));
+    assert_eq!(usage_window, Some(ceiling));
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
 fn assert_same_window(requests: &[ResponsesRequest]) {
     let first = requests[0].header("x-codex-window-id").unwrap();
     assert!(

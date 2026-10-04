@@ -371,7 +371,8 @@ async fn run_compact_task_inner_impl(
                     retries = 0;
                     continue;
                 }
-                sess.set_total_tokens_full(turn_context.as_ref()).await;
+                sess.set_total_tokens_full(turn_context.as_ref(), turn_context.model_info())
+                    .await;
                 return Err(e);
             }
             Err(e) => {
@@ -454,7 +455,8 @@ async fn run_compact_task_inner_impl(
         },
     )
     .await;
-    sess.recompute_token_usage(&turn_context).await;
+    sess.recompute_token_usage(&turn_context, turn_context.model_info())
+        .await;
 
     sess.emit_turn_item_completed(&turn_context, compaction_item)
         .await;

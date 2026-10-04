@@ -375,7 +375,11 @@ async fn run_remote_compact_task_inner_impl(
         },
     )
     .await;
-    sess.recompute_token_usage(compaction_turn_context).await;
+    sess.recompute_token_usage(
+        compaction_turn_context,
+        compaction_turn_context.model_info(),
+    )
+    .await;
 
     sess.emit_turn_item_completed(compaction_turn_context, compaction_item)
         .await;

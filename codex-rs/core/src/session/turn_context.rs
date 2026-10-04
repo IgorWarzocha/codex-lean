@@ -757,10 +757,13 @@ impl TurnContext {
             .unwrap_or_else(|| "default".to_string())
     }
 
-    /// Legacy: returns the frozen initial-turn model context window.
+    /// Returns the frozen initial-turn execution ceiling for usage reporting.
     /// Step-scoped consumers should use their captured `StepContext::settings`.
     pub(crate) fn model_context_window(&self) -> Option<i64> {
-        self.model_info().usable_context_window()
+        super::context_window::execution_context_window(
+            self.config.context_strategy,
+            self.model_info(),
+        )
     }
 
     pub(crate) fn apps_enabled(&self) -> bool {

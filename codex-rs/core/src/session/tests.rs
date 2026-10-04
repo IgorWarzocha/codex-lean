@@ -3455,7 +3455,9 @@ async fn recompute_token_usage_uses_session_base_instructions() {
         .expect("estimate with model instructions");
     assert_ne!(expected_tokens, model_estimated_tokens);
 
-    session.recompute_token_usage(&turn_context).await;
+    session
+        .recompute_token_usage(&turn_context, turn_context.model_info())
+        .await;
 
     let actual_tokens = session
         .state
@@ -3483,10 +3485,13 @@ async fn recompute_token_usage_updates_model_context_window() {
 
     update_turn_settings_for_test(&mut turn_context, |settings| {
         Arc::make_mut(&mut settings.model_info).context_window = Some(128_000);
+        Arc::make_mut(&mut settings.model_info).max_context_window = Some(128_000);
         Arc::make_mut(&mut settings.model_info).effective_context_window_percent = 100;
     });
 
-    session.recompute_token_usage(&turn_context).await;
+    session
+        .recompute_token_usage(&turn_context, turn_context.model_info())
+        .await;
 
     let actual = session.state.lock().await.token_info().expect("token info");
     assert_eq!(actual.model_context_window, Some(128_000));

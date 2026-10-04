@@ -4731,7 +4731,11 @@ impl Session {
             true,
         )
         .await;
-        self.recompute_token_usage(step_context.turn.as_ref()).await;
+        self.recompute_token_usage(
+            step_context.turn.as_ref(),
+            &step_context.settings.model_info,
+        )
+        .await;
         window_number
     }
 
@@ -4886,10 +4890,13 @@ impl Session {
         token_usage: Option<&TokenUsage>,
     ) -> CodexResult<()> {
         if let Some(token_usage) = token_usage {
+            let model_context_window = context_window::execution_context_window(
+                turn_context.config.context_strategy,
+                &settings.model_info,
+            );
             let token_info = {
                 let mut state = self.state.lock().await;
-                state
-                    .update_token_info_from_usage(token_usage, turn_context.model_context_window());
+                state.update_token_info_from_usage(token_usage, model_context_window);
                 if matches!(
                     turn_context.config.model_auto_compact_token_limit_scope,
                     AutoCompactTokenLimitScope::BodyAfterPrefix
@@ -4927,7 +4934,11 @@ impl Session {
         Ok(())
     }
 
-    pub(crate) async fn recompute_token_usage(&self, turn_context: &TurnContext) {
+    pub(crate) async fn recompute_token_usage(
+        &self,
+        turn_context: &TurnContext,
+        model_info: &ModelInfo,
+    ) {
         let history = self.clone_history().await;
         let base_instructions = self.get_base_instructions().await;
         let Some(estimated_total_tokens) =
@@ -4953,7 +4964,10 @@ impl Session {
                 codex_rollout_budget_units: None,
             };
 
-            if let Some(model_context_window) = turn_context.model_context_window() {
+            if let Some(model_context_window) = context_window::execution_context_window(
+                turn_context.config.context_strategy,
+                model_info,
+            ) {
                 info.model_context_window = Some(model_context_window);
             }
 
@@ -5010,8 +5024,15 @@ impl Session {
         self.send_event(turn_context, event).await;
     }
 
-    pub(crate) async fn set_total_tokens_full(&self, turn_context: &TurnContext) {
-        if let Some(context_window) = turn_context.model_context_window() {
+    pub(crate) async fn set_total_tokens_full(
+        &self,
+        turn_context: &TurnContext,
+        model_info: &ModelInfo,
+    ) {
+        if let Some(context_window) = context_window::execution_context_window(
+            turn_context.config.context_strategy,
+            model_info,
+        ) {
             let mut state = self.state.lock().await;
             state.set_token_usage_full(context_window);
         }
@@ -5286,6 +5307,9 @@ async fn build_hooks_config(
         shell_args: hook_shell_argv,
     }
 }
+
+#[cfg(test)]
+mod context_reporting_tests;
 
 #[cfg(test)]
 #[path = "elicitation_holders_tests.rs"]
