@@ -1,6 +1,6 @@
 # Desktop personality patcher
 
-An opt-in ASAR patch that appends your communication preferences to **Codex desktop's native text and realtime voice instructions**. It preserves Codex's own prompts and tool handoffs. Python 3.10 or newer is required, without additional packages.
+An opt-in ASAR patch that appends your communication preferences to **Codex desktop's native text and realtime voice instructions**. By default, it preserves Codex's own prompts and tool handoffs. A separate manual option shortens selected default desktop text guidance. Python 3.10 or newer is required, without additional packages.
 
 The patcher writes separate artifacts. It never installs them, changes its inputs, or overwrites existing outputs. An optional Linux hook reapplies the patch after package updates. Compatibility is checked against the specific native instruction code it edits, not the app version or whole-archive hash. Unrelated code changes and renamed bundle chunks are allowed. Unfamiliar instruction code, ambiguous owners, and already-patched archives are rejected.
 
@@ -24,6 +24,27 @@ python3 scripts/desktop-voice-prompt/patch.py \
 To select another absolute path on the app's machine, add `--personality-file "$HOME/path/to/codex_personality.md"`. Only that path is embedded, not the contents. The desktop patch does not read `personality_file` from `config.toml`. Use the explicit flag if you want a non-default file.
 
 A missing default file or an empty file adds nothing. An existing unreadable file, invalid UTF-8, or content over 64 KiB causes an error rather than silently ignoring preferences. An explicitly selected file must exist. The Pi-owned `~/.pi/agent/REALTIME-SYSTEM-PROMPT.md` and resolved aliases are deliberately excluded.
+
+## Optional lean desktop guidance
+
+From a complete source checkout, add `--slim-app-instructions` to shorten the default media, thread coordination, and sidebar sections. The option is off by default and checks both native instruction owners before writing anything:
+
+```sh
+python3 scripts/desktop-voice-prompt/patch.py \
+  --asar /usr/lib/chatgpt/resources/app.asar \
+  --check --slim-app-instructions
+
+python3 scripts/desktop-voice-prompt/patch.py \
+  --asar /usr/lib/chatgpt/resources/app.asar \
+  --slim-app-instructions \
+  --output "$HOME/app.lean-personality.asar"
+```
+
+Supply `--personality-file` if you use a dedicated preferences file. The option changes only verified default string literals, not the composed instructions. User preferences, instruction overrides, Git settings, feature flags, projectless paths, LaTeX guidance, and other native sections remain intact. Native realtime instructions and the personality append behavior are unchanged. Missing, ambiguous, malformed, or unfamiliar default instructions or composers reject the entire optional transformation.
+
+This mode has been validated offline against Linux 26.930.31730. Other releases and macOS have not been approved for its additional code boundaries. The broader personality-only compatibility list below does not imply support for slimming.
+
+Slimming is a source-checkout, manual preparation option. The installed six-file Git hook payload does not fetch its optional module or accept this flag. The pacman hook remains append-only. A package update removes manual slimming while reapplying personality preferences.
 
 ## macOS
 
@@ -95,7 +116,7 @@ The main process appends a `<user_communication_preferences>` block after the re
 
 For voice, a narrow preload bridge supplies the same block to the native `thread/realtime/start` prompt and the client-owned `/wham/realtime/calls` instructions. Both keep the native prompt as an unchanged prefix. Existing-call attachment keeps its native handoff request unchanged. No bundled consumer ChatGPT wingman override is modified.
 
-The renderer can request only the configured file. Access is restricted to the app's top-level `app://-` frames. Native routing, authentication, SDP, WebRTC, tools, delegation, and handoff fields remain unchanged. No native prompt or tool schema is copied into this repository.
+The renderer can request only the configured file. Access is restricted to the app's top-level `app://-` frames. Native routing, authentication, SDP, WebRTC, tools, delegation, and handoff fields remain unchanged. The runtime does not duplicate native realtime prompts or tool schemas. Tests include captured desktop instruction-owner fragments.
 
 Offline validation covered Linux 26.930.21537, 26.930.31730, and 26.930.41038, plus the official macOS Apple Silicon DMG 26.930.31730. It compared all untouched archive entries and executed the actual native instruction owners before and after transformation with controlled boundary inputs. Linux laptop personality behavior has also been confirmed in a live user test. macOS launch and native tool execution remain unverified.
 

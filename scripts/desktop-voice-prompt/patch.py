@@ -66,10 +66,17 @@ def mac_info(path: Path, bundle: Asar):
     ) else plistlib.FMT_XML
 
 
-def write_outputs(bundle, layout, prompt, output, info, output_info):
+def write_outputs(
+    bundle, layout, prompt, output, info, output_info, *, slim_app_instructions=False
+):
     created = []
     try:
-        bundle.write(output, replacements(bundle, layout, prompt))
+        bundle.write(
+            output,
+            replacements(
+                bundle, layout, prompt, slim_app_instructions=slim_app_instructions
+            ),
+        )
         created.append(output)
         if info is not None:
             document, format = info
@@ -88,9 +95,24 @@ def write_outputs(bundle, layout, prompt, output, info, output_info):
         raise
 
 
+def optional_app_instructions(bundle: Asar, enabled: bool) -> dict[str, bytes]:
+    if not enabled:
+        return {}
+    # Installed Git bootstraps fetch the original six-file manifest. Keep their
+    # append-only path independent of this opt-in repository module.
+    from app_instructions import slim_defaults
+
+    return slim_defaults(bundle)
+
+
 def replacements(
-    bundle: Asar, layout: BundleLayout, prompt: Path | None
+    bundle: Asar,
+    layout: BundleLayout,
+    prompt: Path | None,
+    *,
+    slim_app_instructions: bool = False,
 ) -> dict[str, bytes]:
+    app_instructions = optional_app_instructions(bundle, slim_app_instructions)
     config = {"path": str(prompt) if prompt else None, "required": prompt is not None}
     main = (
         (HERE / "runtime-main.js")
@@ -104,6 +126,7 @@ def replacements(
     for region in (layout.rpc, layout.call):
         initial = initial.replace(region.source, append_voice(region))
     return {
+        **app_instructions,
         layout.main: main.encode() + native_main.encode(),
         layout.preload: preload + bundle.read(layout.preload),
         layout.initial: initial.encode(),
@@ -117,6 +140,11 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--check", action="store_true", help="verify support without writing"
+    )
+    parser.add_argument(
+        "--slim-app-instructions",
+        action="store_true",
+        help="also slim verified default desktop text guidance; off by default, without changing realtime instructions",
     )
     parser.add_argument(
         "--personality-file",
@@ -146,6 +174,7 @@ def main(argv=None) -> int:
         version, layout = verify_bundle(bundle)
         info = mac_info(args.info_plist, bundle) if args.info_plist else None
         if args.check:
+            optional_app_instructions(bundle, args.slim_app_instructions)
             print(
                 f"Compatible: Codex {version}, verified native text and voice instruction code"
             )
@@ -171,18 +200,30 @@ def main(argv=None) -> int:
             raise ValueError("outputs must be distinct from each other and all inputs")
         if any(path.exists() or path.is_symlink() for path in outputs):
             raise FileExistsError("an output path already exists")
-        write_outputs(bundle, layout, prompt, args.output, info, args.output_info_plist)
+        write_outputs(
+            bundle,
+            layout,
+            prompt,
+            args.output,
+            info,
+            args.output_info_plist,
+            slim_app_instructions=args.slim_app_instructions,
+        )
         print(f"Created {args.output}. Input unchanged. Not installed.")
         print(
             f"Text and voice append preferences from {prompt or '$CODEX_HOME/codex_personality.md'} at runtime."
         )
         print("Keep the matching app.asar.unpacked directory when installing manually.")
+        if args.slim_app_instructions:
+            print(
+                "Slimmed verified default desktop text guidance. Native voice unchanged."
+            )
         if info is not None:
             print(
                 f"Created {args.output_info_plist} with the new ASAR integrity hash. macOS code signing still requires a separate step."
             )
         return 0
-    except (OSError, ValueError, RecursionError) as error:
+    except (OSError, ValueError, RecursionError, ImportError) as error:
         print(f"Cannot patch: {error}", file=sys.stderr)
         return 1
 
