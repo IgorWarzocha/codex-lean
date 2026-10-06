@@ -56,6 +56,11 @@ impl DynamicToolHandler {
             tool.name.clone(),
         );
         let mut output_tool = dynamic_tool_to_responses_api_tool(tool).ok()?;
+        if namespace.is_some_and(|namespace| namespace.name == "codex_app")
+            && let Some(description) = super::codex_app::compact_description(tool)
+        {
+            output_tool.description = description.to_string();
+        }
         // Exposure controls deferral; tool search restores this marker for deferred results.
         output_tool.defer_loading = None;
         let spec = match namespace {
@@ -158,10 +163,14 @@ impl DynamicToolHandler {
             .into_iter()
             .map(FunctionCallOutputContentItem::from)
             .collect::<Vec<_>>();
-        Ok(boxed_tool_output(FunctionToolOutput::from_content(
-            body,
-            Some(success),
-        )))
+        let output = FunctionToolOutput::from_content(body, Some(success));
+        if self.tool_name.namespace.as_deref() == Some("codex_app") {
+            Ok(boxed_tool_output(
+                super::codex_app::CodexAppToolOutput::new(output),
+            ))
+        } else {
+            Ok(boxed_tool_output(output))
+        }
     }
 }
 

@@ -19,6 +19,7 @@ use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::ResponsesApiTool;
 use codex_extension_api::ToolCall as ExtensionToolCall;
 use codex_extension_api::ToolExecutor;
+use codex_features::Feature;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
 use codex_protocol::dynamic_tools::DynamicToolFunctionSpec;
 use codex_protocol::dynamic_tools::DynamicToolNamespaceSpec;
@@ -433,7 +434,11 @@ async fn tools_without_handlers_do_not_support_parallel() -> anyhow::Result<()> 
 
 #[tokio::test]
 async fn specs_filter_deferred_dynamic_tools() -> anyhow::Result<()> {
-    let (_, turn) = make_session_and_context().await;
+    let (_, mut turn) = make_session_and_context().await;
+    // Exercise direct exposure rather than the default Notebook's nested surface.
+    for feature in [Feature::CodeMode, Feature::CodeModeOnly] {
+        Arc::make_mut(&mut turn.config).features.disable(feature)?;
+    }
     let turn = Arc::new(turn);
     let step_context = StepContext::for_test(Arc::clone(&turn));
     let hidden_tool = "hidden_dynamic_tool";
@@ -529,7 +534,10 @@ fn mcp_runtime(tool_info: codex_mcp::ToolInfo) -> RegisteredTool {
 
 #[tokio::test]
 async fn extension_tool_executors_are_model_visible_and_dispatchable() -> anyhow::Result<()> {
-    let (mut session, turn) = make_session_and_context().await;
+    let (mut session, mut turn) = make_session_and_context().await;
+    for feature in [Feature::CodeMode, Feature::CodeModeOnly] {
+        Arc::make_mut(&mut turn.config).features.disable(feature)?;
+    }
     session.services.extensions = extension_tool_test_registry();
     let turn = Arc::new(turn);
     let step_context = StepContext::for_test(Arc::clone(&turn));

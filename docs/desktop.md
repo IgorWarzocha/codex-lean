@@ -60,6 +60,14 @@ To bring additional skills across, [copy selected packages into Lean](skills.md#
 
 Notebook requires full access. For a trusted execution host, set `sandbox_mode = "danger-full-access"` in `~/.codex-lean/config.toml` and select compatible permissions in the GUI. Do not overwrite existing configuration or silently expand permissions. To retain sandboxing, run `codex-lean settings set code-mode v8` instead. API-key users also need `codex-lean settings set context compaction`.
 
+## Desktop tools in Notebook
+
+When Desktop uses Lean's Notebook, its `codex_app` tools are available through the existing `tools.codex_app__NAME` calls. Most are deferred, so discover the needed tool and read its help rather than printing the whole catalogue. Native arguments, approvals and Desktop UI actions stay unchanged.
+
+Lean shortens audited tool descriptions. Unknown or changed descriptions remain native. A successful reply containing a single JSON object or array becomes a Notebook value, so the agent can select useful fields before printing. Native reply text is preserved. Failed replies, plain text and mixed media keep their existing handling. No result fields are automatically dropped or truncated.
+
+These changes require an updated Lean backend, not another Desktop bundle patch. An explicitly disabled Notebook or direct tool mode remains respected.
+
 ## Share the backend with the CLI
 
 Before connecting Desktop and the CLI to the same backend, explicitly enable model discovery in Lean's home on the machine running the backend:

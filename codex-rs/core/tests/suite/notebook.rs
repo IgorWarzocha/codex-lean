@@ -1,14 +1,21 @@
 use anyhow::Result;
 use codex_code_mode::CodeModeSessionProvider;
 use codex_config::types::ContextStrategy;
+use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
 use codex_features::CodeModeRuntime;
 use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_notebook::DenoNotebookSessionProvider;
+use codex_protocol::dynamic_tools::DynamicToolCallOutputContentItem;
+use codex_protocol::dynamic_tools::DynamicToolNamespaceSpec;
+use codex_protocol::dynamic_tools::DynamicToolResponse;
+use codex_protocol::dynamic_tools::DynamicToolSpec;
+use codex_protocol::items::TurnItem;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
@@ -22,6 +29,106 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event_match;
+use serde_json::Value;
+use serde_json::json;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn codex_app_json_reply_is_filterable_in_notebook_with_native_dispatch() -> Result<()> {
+    let server = start_mock_server().await;
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_custom_tool_call(
+                    "desktop-query",
+                    "exec",
+                    "const result = await tools.codex_app__list_artifacts({}); text(result.kept);",
+                ),
+                ev_completed("desktop-query-response"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "Done."),
+                ev_completed("done"),
+            ]),
+        ],
+    )
+    .await;
+    let mut test = test_codex().build_with_auto_env(&server).await?;
+    let fixture: Value = serde_json::from_str(include_str!("../../assets/tools/codex_app.json"))?;
+    let namespace: DynamicToolNamespaceSpec = serde_json::from_value(fixture["namespace"].clone())?;
+    test.codex.shutdown_and_wait().await?;
+    let thread = test
+        .thread_manager
+        .start_thread(StartThreadOptions {
+            dynamic_tools: vec![DynamicToolSpec::Namespace(namespace)],
+            environments: Some(vec![test.executor_environment().selection().clone()]),
+            ..StartThreadOptions::new(test.config.clone())
+        })
+        .await?;
+    test.codex = thread.thread;
+    test.session_configured = thread.session_configured;
+    test.codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Inspect the attached artifacts.".to_string(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                permission_profile: Some(PermissionProfile::Disabled),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    let call = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::ItemStarted(event) => match &event.item {
+            TurnItem::DynamicToolCall(call) => Some(call.clone()),
+            _ => None,
+        },
+        EventMsg::Error(error) => panic!("failed before dynamic dispatch: {}", error.message),
+        EventMsg::TurnComplete(_) => panic!("completed without dynamic dispatch"),
+        _ => None,
+    })
+    .await;
+    assert_eq!(call.namespace.as_deref(), Some("codex_app"));
+    assert_eq!(call.tool, "list_artifacts");
+    assert_eq!(call.arguments, json!({}));
+    // Synthetic data tests our JSON-to-notebook contract, not the Desktop's
+    // undocumented per-tool result fields. Native client execution stays intact.
+    test.codex
+        .submit(Op::DynamicToolResponse {
+            id: call.id,
+            response: DynamicToolResponse {
+                content_items: vec![DynamicToolCallOutputContentItem::InputText {
+                    text: json!({"kept": "selected-value", "bulk": "not-printed"}).to_string(),
+                }],
+                success: true,
+            },
+        })
+        .await?;
+    wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::TurnComplete(_) => Some(()),
+        EventMsg::Error(error) => panic!("notebook failed: {}", error.message),
+        _ => None,
+    })
+    .await;
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    let output = requests[1]
+        .custom_tool_call_output("desktop-query")
+        .to_string();
+    assert!(output.contains("selected-value"), "{output}");
+    assert!(!output.contains("not-printed"), "{output}");
+    assert!(!output.contains("Script error"), "{output}");
+    assert!(
+        requests[0].body_json()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "codex_app")
+    );
+    test.codex.shutdown_and_wait().await?;
+    Ok(())
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn default_notebook_rejects_sandboxed_sampling_before_provider_request() -> Result<()> {
