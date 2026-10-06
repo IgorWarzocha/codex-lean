@@ -30,6 +30,13 @@ CALL = (
     "async function nativeCall({codexSessionId:e,conversationId:t,initialItems:n,offerSdp:r,prompt:i,realtimeSessionOverrides:o})"
     "{return o?{instructions:i}:{instructions:i}}"
 )
+CAPTURE = json.loads(
+    (patch.HERE / "fixtures/linux-31730-instructions.json").read_text()
+)
+APP_INSTRUCTION_FILES = {
+    ".vite/build/bootstrap-captured.js": CAPTURE["bootstrap"].encode(),
+    ".vite/build/worker.js": CAPTURE["worker"].encode(),
+}
 
 
 def fixture(path: Path, files: dict[str, bytes]) -> None:
@@ -78,6 +85,7 @@ class PatcherTests(unittest.TestCase):
         self.source = self.directory / "original.asar"
         self.output = self.directory / "patched.asar"
         self.files = {
+            **APP_INSTRUCTION_FILES,
             "package.json": json.dumps(
                 {
                     "name": "openai-codex-electron",

@@ -1,4 +1,4 @@
-"""Opt-in replacement of verified default desktop prose, never composed instructions."""
+"""Replace verified default desktop prose, never composed instructions."""
 
 import hashlib
 import json
@@ -8,8 +8,8 @@ from asar import Asar, UnsupportedBundle
 from regions import packed_module
 
 
-# Exact defaults and complete instruction composition from Linux 26.930.31730.
-# No other release's app prose has been approved for this optional mode.
+# Exact defaults and complete composition, identical in Linux 31730 and 41038.
+# Unfamiliar default prose and composers must be audited before patching.
 OWNERS = {
     "bootstrap": (
         r"\.vite/build/bootstrap-[^/]+\.js",

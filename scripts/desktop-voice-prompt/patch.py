@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Append user communication preferences to Codex desktop text and voice instructions."""
+"""Slim Codex desktop guidance and append user preferences to text and voice."""
 
 import argparse
 import json
@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from asar import Asar, UnsupportedBundle
+from app_instructions import slim_defaults
 from regions import BundleLayout, append_text, append_voice, inspect_regions
 
 
@@ -66,17 +67,10 @@ def mac_info(path: Path, bundle: Asar):
     ) else plistlib.FMT_XML
 
 
-def write_outputs(
-    bundle, layout, prompt, output, info, output_info, *, slim_app_instructions=False
-):
+def write_outputs(bundle, layout, prompt, output, info, output_info):
     created = []
     try:
-        bundle.write(
-            output,
-            replacements(
-                bundle, layout, prompt, slim_app_instructions=slim_app_instructions
-            ),
-        )
+        bundle.write(output, replacements(bundle, layout, prompt))
         created.append(output)
         if info is not None:
             document, format = info
@@ -95,24 +89,12 @@ def write_outputs(
         raise
 
 
-def optional_app_instructions(bundle: Asar, enabled: bool) -> dict[str, bytes]:
-    if not enabled:
-        return {}
-    # Installed Git bootstraps fetch the original six-file manifest. Keep their
-    # append-only path independent of this opt-in repository module.
-    from app_instructions import slim_defaults
-
-    return slim_defaults(bundle)
-
-
 def replacements(
     bundle: Asar,
     layout: BundleLayout,
     prompt: Path | None,
-    *,
-    slim_app_instructions: bool = False,
 ) -> dict[str, bytes]:
-    app_instructions = optional_app_instructions(bundle, slim_app_instructions)
+    app_instructions = slim_defaults(bundle)
     config = {"path": str(prompt) if prompt else None, "required": prompt is not None}
     main = (
         (HERE / "runtime-main.js")
@@ -142,11 +124,6 @@ def main(argv=None) -> int:
         "--check", action="store_true", help="verify support without writing"
     )
     parser.add_argument(
-        "--slim-app-instructions",
-        action="store_true",
-        help="also slim verified default desktop text guidance; off by default, without changing realtime instructions",
-    )
-    parser.add_argument(
         "--personality-file",
         type=Path,
         help="absolute user-owned personality path; otherwise use the app's CODEX_HOME/codex_personality.md",
@@ -174,9 +151,9 @@ def main(argv=None) -> int:
         version, layout = verify_bundle(bundle)
         info = mac_info(args.info_plist, bundle) if args.info_plist else None
         if args.check:
-            optional_app_instructions(bundle, args.slim_app_instructions)
+            slim_defaults(bundle)
             print(
-                f"Compatible: Codex {version}, verified native text and voice instruction code"
+                f"Compatible: Codex {version}, verified desktop guidance and native text and voice instruction code"
             )
             return 0
         prompt = (
@@ -207,23 +184,19 @@ def main(argv=None) -> int:
             args.output,
             info,
             args.output_info_plist,
-            slim_app_instructions=args.slim_app_instructions,
         )
         print(f"Created {args.output}. Input unchanged. Not installed.")
         print(
             f"Text and voice append preferences from {prompt or '$CODEX_HOME/codex_personality.md'} at runtime."
         )
         print("Keep the matching app.asar.unpacked directory when installing manually.")
-        if args.slim_app_instructions:
-            print(
-                "Slimmed verified default desktop text guidance. Native voice unchanged."
-            )
+        print("Slimmed verified default desktop text guidance. Native voice unchanged.")
         if info is not None:
             print(
                 f"Created {args.output_info_plist} with the new ASAR integrity hash. macOS code signing still requires a separate step."
             )
         return 0
-    except (OSError, ValueError, RecursionError, ImportError) as error:
+    except (OSError, ValueError, RecursionError) as error:
         print(f"Cannot patch: {error}", file=sys.stderr)
         return 1
 

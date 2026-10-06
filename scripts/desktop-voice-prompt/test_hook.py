@@ -15,7 +15,16 @@ import install_hook
 import pacman_hook
 import regions
 from asar import Asar, UnsupportedBundle
-from test_patch import CALL, INITIAL, MAIN, PRELOAD, RPC, TEXT, fixture
+from test_patch import (
+    APP_INSTRUCTION_FILES,
+    CALL,
+    INITIAL,
+    MAIN,
+    PRELOAD,
+    RPC,
+    TEXT,
+    fixture,
+)
 
 
 class HookTests(unittest.TestCase):
@@ -28,6 +37,7 @@ class HookTests(unittest.TestCase):
         self.personality.write_text("You are Howaclawa.\n")
         self.user = pwd.getpwuid(os.getuid()).pw_name
         self.files = {
+            **APP_INSTRUCTION_FILES,
             "package.json": json.dumps(
                 {
                     "name": "openai-codex-electron",

@@ -21,6 +21,7 @@ SUBTREE = "scripts/desktop-voice-prompt"
 PATCHER_SOURCES = (
     "asar.py",
     "regions.py",
+    "app_instructions.py",
     "patch.py",
     "runtime-main.js",
     "runtime-preload.js",

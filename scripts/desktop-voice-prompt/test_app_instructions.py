@@ -13,6 +13,7 @@ from pathlib import Path
 import app_instructions
 import patch
 from asar import Asar
+from git_update import PATCHER_SOURCES
 from test_patch import fixture
 
 
@@ -80,7 +81,6 @@ class AppInstructionsTests(unittest.TestCase):
         )
         self.assertEqual(
             self.invoke(
-                "--slim-app-instructions",
                 "--info-plist",
                 str(plist),
                 "--output-info-plist",
@@ -120,25 +120,15 @@ class AppInstructionsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("2048 native composer comparisons passed", result.stdout)
 
-    def test_opt_in_changes_only_default_literals_and_keeps_voice_personality_and_archive_contracts(
+    def test_default_patch_changes_only_default_literals_and_keeps_voice_personality_and_archive_contracts(
         self,
     ):
         original = Asar(self.source)
         version, layout = patch.verify_bundle(original)
         self.assertEqual(version, "26.930.31730")
         default = patch.replacements(original, layout, PERSONALITY)
-        explicit_off = patch.replacements(
-            original, layout, PERSONALITY, slim_app_instructions=False
-        )
-        self.assertEqual(default, explicit_off)
-        baseline = self.directory / "append-only.asar"
-        original.write(baseline, default)
-        second = self.directory / "explicit-off.asar"
-        original.write(second, explicit_off)
-        self.assertEqual(baseline.read_bytes(), second.read_bytes())
         self.assertEqual(
             self.invoke(
-                "--slim-app-instructions",
                 "--personality-file",
                 str(PERSONALITY),
                 "--output",
@@ -148,7 +138,7 @@ class AppInstructionsTests(unittest.TestCase):
         )
         result = Asar(self.output)
         for name in (MAIN, PRELOAD, INITIAL):
-            # Entire text/voice personality transformations are byte-identical.
+            # CLI and hook share the same text/voice personality transformations.
             self.assertEqual(result.read(name), default[name])
         for name, entry in original.entries.items():
             if name in (BOOTSTRAP, WORKER, MAIN, PRELOAD, INITIAL):
@@ -231,35 +221,28 @@ class AppInstructionsTests(unittest.TestCase):
         files = dict(self.files)
         files[".vite/build/bootstrap-renamed.js"] = files.pop(BOOTSTRAP)
         fixture(self.source, files)
-        self.assertEqual(self.invoke("--check", "--slim-app-instructions"), 0)
+        self.assertEqual(self.invoke("--check"), 0)
         self.assertFalse(self.output.exists())
         files[BOOTSTRAP] = files[".vite/build/bootstrap-renamed.js"]
         fixture(self.source, files)
-        self.assertEqual(
-            self.invoke("--slim-app-instructions", "--output", str(self.output)), 1
-        )
+        self.assertEqual(self.invoke("--output", str(self.output)), 1)
         self.assertFalse(self.output.exists())
 
-    def test_old_six_file_git_payload_still_runs_append_only_cli_and_hook(self):
-        legacy = self.directory / "legacy-bootstrap-payload"
-        legacy.mkdir()
-        for name in (
-            "asar.py",
-            "regions.py",
-            "patch.py",
-            "runtime-main.js",
-            "runtime-preload.js",
-            "pacman_hook.py",
-        ):
-            shutil.copyfile(HERE / name, legacy / name)
-        output = self.directory / "legacy.asar"
+    def test_git_payload_slims_by_default_in_cli_and_hook_and_requires_complete_sources(
+        self,
+    ):
+        payload = self.directory / "git-payload"
+        payload.mkdir()
+        for name in PATCHER_SOURCES:
+            shutil.copyfile(HERE / name, payload / name)
+        output = self.directory / "payload.asar"
         cli = subprocess.run(
             [
                 "python3",
                 "-E",
                 "-s",
                 "-B",
-                str(legacy / "patch.py"),
+                str(payload / "patch.py"),
                 "--asar",
                 str(self.source),
                 "--personality-file",
@@ -283,7 +266,7 @@ class AppInstructionsTests(unittest.TestCase):
                 "-s",
                 "-B",
                 "-c",
-                f"import sys;sys.path.insert(0,{str(legacy)!r});from pathlib import Path;from pacman_hook import reapply;reapply(Path({str(hook_archive)!r}),Path({str(PERSONALITY)!r}))",
+                f"import sys;sys.path.insert(0,{str(payload)!r});from pathlib import Path;from pacman_hook import reapply;reapply(Path({str(hook_archive)!r}),Path({str(PERSONALITY)!r}))",
             ],
             capture_output=True,
             text=True,
@@ -291,26 +274,31 @@ class AppInstructionsTests(unittest.TestCase):
         )
         self.assertEqual(runner.returncode, 0, runner.stdout + runner.stderr)
         self.assertEqual(hook_archive.read_bytes(), output.read_bytes())
-        self.assertEqual(Asar(output).read(BOOTSTRAP), self.files[BOOTSTRAP])
-        self.assertEqual(Asar(output).read(WORKER), self.files[WORKER])
-        missing_optional = subprocess.run(
+        for name in (BOOTSTRAP, WORKER):
+            self.assertNotEqual(Asar(output).read(name), self.files[name])
+        (payload / "app_instructions.py").unlink()
+        incomplete_output = self.directory / "incomplete.asar"
+        before = self.source.read_bytes()
+        missing_required = subprocess.run(
             [
                 "python3",
                 "-E",
                 "-s",
                 "-B",
-                str(legacy / "patch.py"),
+                str(payload / "patch.py"),
                 "--asar",
                 str(self.source),
-                "--check",
-                "--slim-app-instructions",
+                "--output",
+                str(incomplete_output),
             ],
             capture_output=True,
             text=True,
             check=False,
         )
-        self.assertEqual(missing_optional.returncode, 1)
-        self.assertIn("Cannot patch", missing_optional.stderr)
+        self.assertNotEqual(missing_required.returncode, 0)
+        self.assertIn("app_instructions", missing_required.stderr)
+        self.assertFalse(incomplete_output.exists())
+        self.assertEqual(self.source.read_bytes(), before)
 
 
 if __name__ == "__main__":
