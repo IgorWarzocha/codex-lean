@@ -1,4 +1,4 @@
-# Desktop personality patcher
+# Desktop instructions patcher
 
 An ASAR patch that shortens selected default desktop text guidance and appends your communication preferences to **Codex desktop's native text and realtime voice instructions**. Native tool handoffs and realtime prompts remain intact. Python 3.10 or newer is required, without additional packages.
 
@@ -9,14 +9,14 @@ The patcher writes separate artifacts. It never installs them, changes its input
 From this repository, check the installed archive:
 
 ```sh
-python3 scripts/desktop-voice-prompt/patch.py \
+python3 scripts/desktop-instructions/patch.py \
   --asar /usr/lib/chatgpt/resources/app.asar --check
 ```
 
 Create your own UTF-8 Markdown file at `$CODEX_HOME/codex_personality.md`, normally `~/.codex/codex_personality.md`. Write communication preferences, not copies of Codex's tool schemas or native instructions. The script never creates or reads your personality file. The app reads it at runtime.
 
 ```sh
-python3 scripts/desktop-voice-prompt/patch.py \
+python3 scripts/desktop-instructions/patch.py \
   --asar /usr/lib/chatgpt/resources/app.asar \
   --output "$HOME/app.personality.asar"
 ```
@@ -38,7 +38,7 @@ The complete patch has been validated offline against Linux 26.930.31730 and 26.
 macOS is not currently supported by the complete patch because its default desktop instruction boundaries have not been audited. Once those boundaries are supported, use the archive inside the app bundle. The current official DMG names the app ChatGPT.app, despite its Codex bundle identity. Supply its matching `Info.plist` so the script can generate updated ASAR integrity metadata:
 
 ```sh
-python3 scripts/desktop-voice-prompt/patch.py \
+python3 scripts/desktop-instructions/patch.py \
   --asar "/Applications/ChatGPT.app/Contents/Resources/app.asar" \
   --info-plist "/Applications/ChatGPT.app/Contents/Info.plist" \
   --output "$HOME/app.personality.asar" \
@@ -60,7 +60,7 @@ To remove the patch, quit the app and reinstall its package. No restore backup i
 On Arch Linux and Omarchy, install the optional hook with your desktop account and an existing personality file:
 
 ```sh
-sudo python3 scripts/desktop-voice-prompt/install_hook.py \
+sudo python3 scripts/desktop-instructions/install_hook.py \
   --user "$USER" \
   --personality-file "$HOME/.local/state/codex-desktop-personality-test/codex_personality.md"
 ```
@@ -71,7 +71,7 @@ On every app update, the hook fetches the latest commit from [`IgorWarzocha/code
 
 **Enabling this hook trusts future code on that Git branch to run as root.** HTTPS verifies the server, not the safety of each commit. The installed launcher and Git-fetching bootstrap stay fixed until you rerun the installer. Patcher updates on the branch take effect automatically.
 
-If you installed the hook before slimming became standard, rerun the installer above. The older Git bootstrap fetches only the personality patch's six source files. The current patch also requires `app_instructions.py`. The updated bootstrap fetches it and reapplies both slimming and personality after package updates. An incomplete payload fails visibly rather than producing a personality-only patch.
+Rerun the installer if your hook was installed before the source directory was renamed to `scripts/desktop-instructions`. The fixed Git bootstrap needs the new fetch path and the complete slimming source manifest. Old bootstraps cannot follow the rename automatically. The installed hook paths and journal tag remain unchanged. An incomplete payload fails visibly rather than producing a personality-only patch.
 
 The hook runs after any package installs or upgrades `usr/lib/chatgpt/resources/app.asar`, including `chatgpt-bin` updates through pacman, yay, and Omarchy. It gracefully closes the selected user's ChatGPT desktop executable before fetching Git. Shutdown interrupts any active desktop conversation. Only processes running `/usr/lib/chatgpt/ChatGPT` are targeted, including the deleted executable left running after a package upgrade. CLI agents and `cua_node` workers are not signalled. The hook waits up to ten seconds for Electron to exit. If shutdown fails or the app restarts during shutdown, it warns and refuses to patch rather than force-killing the app.
 
@@ -116,5 +116,5 @@ Offline validation of the complete patch covered Linux 26.930.31730 and 26.930.4
 Python 3.10 or newer and Node.js 22 or newer are required. Tests use temporary files, without network access or an installed app.
 
 ```sh
-python3 -m unittest discover -s scripts/desktop-voice-prompt -p 'test_*.py' -v
+python3 -m unittest discover -s scripts/desktop-instructions -p 'test_*.py' -v
 ```

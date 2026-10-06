@@ -17,7 +17,7 @@ from pacman_hook import close_app, report, validate_personality
 LIBRARY = Path("/opt/codex-desktop-personality")
 REPOSITORY = "https://github.com/IgorWarzocha/codex-lean.git"
 BRANCH = "lean"
-SUBTREE = "scripts/desktop-voice-prompt"
+SUBTREE = "scripts/desktop-instructions"
 PATCHER_SOURCES = (
     "asar.py",
     "regions.py",

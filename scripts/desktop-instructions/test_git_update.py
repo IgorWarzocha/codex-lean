@@ -29,7 +29,7 @@ class GitUpdateTests(unittest.TestCase):
         self.command("init", "-b", "lean")
         self.command("config", "user.name", "Fixture")
         self.command("config", "user.email", "fixture@example.invalid")
-        self.sources = self.repository / git_update.SUBTREE
+        self.sources = self.repository / "scripts/desktop-instructions"
         self.sources.mkdir(parents=True)
         for name in git_update.PATCHER_SOURCES:
             (self.sources / name).write_text("# fixture\n")
