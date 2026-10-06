@@ -97,20 +97,24 @@ class AppInstructionsTests(unittest.TestCase):
     def test_actual_composers_preserve_all_feature_combinations_overrides_git_and_heartbeats(
         self,
     ):
+        self.assert_composers(CAPTURE, "31730")
+
+    def assert_composers(self, capture, version):
         transformed = app_instructions.slim_defaults(Asar(self.source))
         result = subprocess.run(
             ["node", str(HERE / "test_app_instructions.cjs")],
             input=json.dumps(
                 {
                     "before": {
-                        "bootstrap": CAPTURE["bootstrap"],
-                        "worker": CAPTURE["worker"],
+                        "bootstrap": capture["bootstrap"],
+                        "worker": capture["worker"],
                     },
                     "after": {
                         "bootstrap": transformed[BOOTSTRAP].decode(),
                         "worker": transformed[WORKER].decode(),
                     },
                     "sections": [text for _, text in app_instructions.SECTIONS],
+                    "version": version,
                 }
             ),
             capture_output=True,
@@ -197,6 +201,48 @@ class AppInstructionsTests(unittest.TestCase):
                     files = dict(self.files)
                     mutate(files, owner)
                     self.assert_rejected_without_outputs(files)
+
+    def test_61225_native_call_accepts_only_audited_code_and_preserves_payloads(self):
+        capture = json.loads(
+            (HERE / "fixtures/linux-61225-instructions.json").read_text()
+        )
+        files = dict(self.files)
+        files[BOOTSTRAP] = capture["bootstrap"].encode()
+        files[WORKER] = capture["worker"].encode()
+        files[INITIAL] = (
+            CAPTURE["rpc"] + capture["call"] + "var untouched=1;"
+        ).encode()
+        fixture(self.source, files)
+        self.assertEqual(self.invoke("--check"), 0)
+        self.assert_composers(capture, "61225")
+        self.assertEqual(self.invoke("--output", str(self.output)), 0)
+        patched = Asar(self.output).read(INITIAL).decode()
+        start = patched.index("async function E9s(")
+        after = patched[start : patched.index("var untouched=1;", start)]
+        result = subprocess.run(
+            ["node", str(HERE / "test_native_call.cjs")],
+            input=json.dumps({"before": capture["call"], "after": after}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("12 native call payload comparisons passed", result.stdout)
+        self.output.unlink()
+        for owner, original, changed in (
+            (INITIAL, b"gpt-live-1-codex", b"unfamiliar-model"),
+            (
+                BOOTSTRAP,
+                b"hR({instructionOverrides:n",
+                b"hR({instructionOverrides:null",
+            ),
+            (WORKER, b"n&&t?", b"n||t?"),
+        ):
+            with self.subTest(owner=owner):
+                drifted = dict(files)
+                self.assertEqual(drifted[owner].count(original), 1)
+                drifted[owner] = drifted[owner].replace(original, changed)
+                self.assert_rejected_without_outputs(drifted)
 
     def test_outer_bootstrap_composer_drift_rejects_without_partial_outputs(self):
         mutations = (

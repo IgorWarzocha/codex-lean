@@ -31,7 +31,7 @@ Every patch run shortens the default media, thread coordination, and sidebar sec
 
 Only verified default string literals change, not the composed instructions. User preferences, instruction overrides, Git settings, feature flags, projectless paths, LaTeX guidance, and other native sections remain intact. Native realtime instructions and the personality append behavior are unchanged. Missing, ambiguous, malformed, or unfamiliar default instructions or composers reject the entire patch rather than falling back to personality-only output.
 
-The complete patch has been validated offline against Linux 26.930.31730 and 26.930.41038. Other releases and macOS need their default instruction boundaries audited before they can be supported. Compatibility follows the checked code boundaries, not the version label.
+The complete patch has been validated offline against Linux 26.930.31730, 26.930.41038 and 26.930.61225. Other releases and macOS need their default instruction boundaries audited before they can be supported. Compatibility follows the checked code boundaries, not the version label.
 
 ## macOS
 

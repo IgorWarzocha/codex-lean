@@ -8,18 +8,24 @@ from asar import Asar, UnsupportedBundle
 from regions import packed_module
 
 
-# Exact defaults and complete composition, identical in Linux 31730 and 41038.
+# Exact defaults and complete composition from Linux 31730, 41038 and 61225.
 # Unfamiliar default prose and composers must be audited before patching.
 OWNERS = {
     "bootstrap": (
         r"\.vite/build/bootstrap-[^/]+\.js",
         r"var [\w$]+=5e3,[\w$]+=16384,[\w$]+=",
-        "12773414b44fbf1e5562dc92b7a67098966d917ae855abaed33c09c4c45f3dac",
+        {
+            "12773414b44fbf1e5562dc92b7a67098966d917ae855abaed33c09c4c45f3dac",
+            "a1c4711aaa35e0b154a4b975f314cbb24d1bb528c7e9623898b23b66f667487b",
+        },
     ),
     "worker": (
         r"\.vite/build/worker\.js",
         r"var [\w$]+=\[\{id:`hotkeyWindow`",
-        "0f645105271f3aac2edbec125cd833a9a09cef7ea32e0f260f108f9058126bd3",
+        {
+            "0f645105271f3aac2edbec125cd833a9a09cef7ea32e0f260f108f9058126bd3",
+            "90c6e5b09772f0ad5f5ef67b0ffd457e3851b0003739548192034f5f9103a114",
+        },
     ),
 }
 START = (
@@ -52,7 +58,7 @@ SECTIONS = (
 
 def slim_defaults(bundle: Asar) -> dict[str, bytes]:
     replacements = {}
-    for owner, (path_pattern, end_pattern, fingerprint) in OWNERS.items():
+    for owner, (path_pattern, end_pattern, fingerprints) in OWNERS.items():
         path = packed_module(bundle, path_pattern)
         source = bundle.read(path).decode("utf-8")
         starts = list(re.finditer(START, source))
@@ -63,7 +69,7 @@ def slim_defaults(bundle: Asar) -> dict[str, bytes]:
             )
         start, end = starts[0].start(), ends[0].start()
         region = source[start:end]
-        if hashlib.sha256(region.encode()).hexdigest() != fingerprint:
+        if hashlib.sha256(region.encode()).hexdigest() not in fingerprints:
             raise UnsupportedBundle(
                 f"unfamiliar desktop {owner} default instructions or composer"
             )

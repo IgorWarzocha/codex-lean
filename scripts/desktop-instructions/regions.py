@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from asar import Asar, UnsupportedBundle
 
 
-# Captured from Linux 26.930.21537, 26.930.31730, 26.930.41038,
-# and macOS 26.930.31730. The 41038 call differs only in minifier identifiers.
+# Captured from Linux 26.930.21537, 26.930.31730, 26.930.41038, 26.930.61225,
+# and macOS 26.930.31730. The later Linux calls only rename minifier identifiers.
 # These are code-region fingerprints, not copied prompts or protocol schemas.
 FINGERPRINTS = {
     "text": {
@@ -21,6 +21,7 @@ FINGERPRINTS = {
         "c16e4cecfbf7e2fda56de3fea0bf6d3479c3d50568966e1ba8f6c0590a9a75b4",
         "efb9d9140960a8d048c48502c3d30060e797e116a9056314a7a29e1c74acf3bf",
         "2510228c0a4280c870f03ff92f218cb8cfc8fab254cf0e0c1d56315afcb893e9",
+        "7ea4cdce4ae39c1d84fb86d95526ae9d2b33a385788ac7c4d48417df0a505fba",
     },
 }
 MARKERS = ("codex-user-personality-v2", "codex-user-voice-prompt-v1")
