@@ -911,7 +911,7 @@ mod tests {
         let reloader = Arc::new(StaticReloader {
             state: state.clone(),
         });
-        Arc::new(NetworkProxyState::with_reloader(state, reloader))
+        Arc::new(NetworkProxyState::with_reloader(state, reloader).with_policy_test_dns())
     }
 
     #[tokio::test(flavor = "current_thread")]

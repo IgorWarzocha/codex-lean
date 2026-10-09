@@ -689,6 +689,7 @@ mod tests {
             metadata,
             crate::LocalBindingPolicy::DefaultFalse,
         )
+        .with_policy_test_dns()
     }
 
     fn is_rfc3339_utc_millis(timestamp: &str) -> bool {

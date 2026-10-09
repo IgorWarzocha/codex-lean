@@ -273,6 +273,8 @@ pub struct NetworkProxyState {
     execution_attributions: Arc<Mutex<HashMap<String, ExecutionAttribution>>>,
     environment_id: Option<Arc<str>>,
     execution_id: Option<Arc<str>>,
+    #[cfg(test)]
+    policy_test_dns: Option<HashMap<String, Vec<IpAddr>>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -312,6 +314,8 @@ impl Clone for NetworkProxyState {
             execution_attributions: self.execution_attributions.clone(),
             environment_id: self.environment_id.clone(),
             execution_id: self.execution_id.clone(),
+            #[cfg(test)]
+            policy_test_dns: self.policy_test_dns.clone(),
         }
     }
 }
@@ -415,6 +419,8 @@ impl NetworkProxyState {
             execution_attributions: Arc::new(Mutex::new(HashMap::new())),
             environment_id: None,
             execution_id: None,
+            #[cfg(test)]
+            policy_test_dns: None,
         }
     }
 
@@ -765,6 +771,18 @@ impl NetworkProxyState {
                 port,
                 DNS_LOOKUP_TIMEOUT,
                 |host, port| async move {
+                    #[cfg(test)]
+                    if let Some(records) = &self.policy_test_dns {
+                        return records
+                            .get(&host)
+                            .map(|ips| ips.iter().map(|ip| SocketAddr::new(*ip, port)).collect())
+                            .ok_or_else(|| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::NotFound,
+                                    "no fixture DNS record",
+                                )
+                            });
+                    }
                     lookup_host((host.as_str(), port))
                         .await
                         .map(Iterator::collect)
@@ -1241,6 +1259,27 @@ fn unix_timestamp() -> i64 {
 }
 
 #[cfg(test)]
+impl NetworkProxyState {
+    /// Policy fixtures exercise classification, not the machine's DNS or network access.
+    /// Unknown names fail closed; this never falls back to the system resolver.
+    pub(crate) fn with_policy_test_dns(mut self) -> Self {
+        self.policy_test_dns = Some(
+            [
+                "example.com",
+                "api.openai.com",
+                "openai.com",
+                "github.com",
+                "api.github.com",
+            ]
+            .into_iter()
+            .map(|host| (host.to_string(), vec![IpAddr::from([8, 8, 8, 8])]))
+            .collect(),
+        );
+        self
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn network_proxy_state_for_policy(
     mut config: crate::config::NetworkProxyConfig,
 ) -> NetworkProxyState {
@@ -1269,7 +1308,7 @@ pub(crate) fn network_proxy_state_for_policy(
         config,
     };
 
-    NetworkProxyState::with_reloader(state, Arc::new(NoopReloader))
+    NetworkProxyState::with_reloader(state, Arc::new(NoopReloader)).with_policy_test_dns()
 }
 
 #[cfg(test)]
@@ -1871,6 +1910,20 @@ mod tests {
 
         assert_eq!(
             state.host_blocked("127.0.0.1", /*port*/ 80).await.unwrap(),
+            HostBlockDecision::Blocked(HostBlockReason::NotAllowedLocal)
+        );
+    }
+
+    #[tokio::test]
+    async fn host_blocked_rejects_allowlisted_mixed_public_and_private_dns_answers() {
+        let mut state = network_proxy_state_for_policy(network_settings(&["example.com"], &[]));
+        state.policy_test_dns = Some(HashMap::from([(
+            "example.com".to_string(),
+            vec![IpAddr::from([8, 8, 8, 8]), IpAddr::from([10, 0, 0, 1])],
+        )]));
+
+        assert_eq!(
+            state.host_blocked("example.com", 443).await.unwrap(),
             HostBlockDecision::Blocked(HostBlockReason::NotAllowedLocal)
         );
     }
