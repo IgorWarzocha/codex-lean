@@ -128,10 +128,14 @@ fn settings_reject_invalid_choices_and_report_overridden_saves() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn settings_reject_managed_feature_denial_before_writing() -> Result<()> {
-    use app_test_support::{ChatGptAuthFixture, write_chatgpt_auth};
+    use app_test_support::ChatGptAuthFixture;
+    use app_test_support::write_chatgpt_auth;
     use codex_config::types::AuthCredentialsStoreMode;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
     let server = MockServer::start().await;
     let home = TempDir::new()?;
     let config = format!(
@@ -167,10 +171,14 @@ async fn settings_reject_managed_feature_denial_before_writing() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn settings_reject_managed_context_conflicts_before_writing() -> Result<()> {
-    use app_test_support::{ChatGptAuthFixture, write_chatgpt_auth};
+    use app_test_support::ChatGptAuthFixture;
+    use app_test_support::write_chatgpt_auth;
     use codex_config::types::AuthCredentialsStoreMode;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
     for feature in ["token_budget", "context_management"] {
         for (choice, required) in [("compaction", true), ("notes", false)] {
             let server = MockServer::start().await;

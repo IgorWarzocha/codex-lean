@@ -46,6 +46,15 @@ impl SessionTask for CompactTask {
             return Ok(None);
         }
 
+        session.emit_turn_started(&ctx, TaskKind::Compact).await;
+        let step_context = session
+            .capture_step_context(Arc::clone(&ctx), &cancellation_token)
+            .await?;
+        let world_state = Arc::new(
+            session
+                .build_world_state_for_step(&step_context, /*new_window*/ true)
+                .await?,
+        );
         let result = match ctx.provider.capabilities().remote_compaction {
             RemoteCompactionSupport::V2 => {
                 emit_compact_metric(
@@ -53,8 +62,12 @@ impl SessionTask for CompactTask {
                     "remote_v2",
                     /*manual*/ true,
                 );
-                crate::compact_remote_v2::run_remote_compact_task(session.clone(), Arc::clone(&ctx))
-                    .await
+                crate::compact_remote_v2::run_remote_compact_task(
+                    session.clone(),
+                    step_context,
+                    world_state,
+                )
+                .await
             }
             RemoteCompactionSupport::Unsupported => {
                 emit_compact_metric(
@@ -72,7 +85,8 @@ impl SessionTask for CompactTask {
                     // Compaction prompt is synthesized; no UI element ranges to preserve.
                     text_elements: Vec::new(),
                 }];
-                crate::compact::run_compact_task(session.clone(), Arc::clone(&ctx), input).await
+                crate::compact::run_compact_task(session.clone(), step_context, world_state, input)
+                    .await
             }
         };
         if let Err(err) = result {

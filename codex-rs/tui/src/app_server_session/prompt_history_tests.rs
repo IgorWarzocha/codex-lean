@@ -11,6 +11,7 @@ use pretty_assertions::assert_eq;
 async fn lifecycle_metadata_uses_local_prompt_history() -> Result<()> {
     let local_home = tempfile::tempdir()?;
     let local_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(local_home.path().to_path_buf())
         .build()
         .await?;
@@ -28,6 +29,7 @@ async fn lifecycle_metadata_uses_local_prompt_history() -> Result<()> {
     for mode in [ThreadParamsMode::Embedded, ThreadParamsMode::Remote] {
         let server_home = tempfile::tempdir()?;
         let mut config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(server_home.path().to_path_buf())
             .build()
             .await?;

@@ -188,6 +188,9 @@ async fn worktree_start_and_fork(backend: &str) -> anyhow::Result<()> {
         format!(
             r#"
 cli_auth_credentials_store = "file"
+context_strategy = "compaction"
+features.code_mode = {{ enabled = false, runtime = "v8" }}
+features.code_mode_only = false
 chatgpt_base_url = "{}/source/backend-api"
 analytics.enabled = false
 check_for_update_on_startup = false
@@ -599,7 +602,18 @@ trust_level = "trusted"
         .await;
         let elevated_handoff = cfg!(windows)
             && output.contains("start the Windows daemon from a non-elevated terminal");
-        assert_eq!(exit, i32::from(elevated_handoff), "{output}");
+        let fork_update_handoff = !fork && backend == "embedded";
+        assert_eq!(
+            exit,
+            i32::from(elevated_handoff || fork_update_handoff),
+            "{output}"
+        );
+        if fork_update_handoff && !elevated_handoff {
+            assert!(
+                output.contains("Upstream daemon installers are disabled for this fork"),
+                "{output}"
+            );
+        }
         assert!(!output.contains("The checkout was kept"), "{output}");
         let metrics = server
             .received_requests()

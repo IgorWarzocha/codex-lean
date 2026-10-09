@@ -1,5 +1,6 @@
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::ensure;
 use app_test_support::TestAppServer;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
 use base64::Engine;
@@ -199,42 +200,11 @@ async fn command_exec_env_overrides_merge_with_server_environment_and_support_un
     Ok(())
 }
 
-#[derive(Clone, Copy)]
-enum CommandExecApplyPatchRollout {
-    Enabled,
-    Disabled,
-}
-
 #[tokio::test]
-async fn command_exec_apply_patch_preserves_line_endings_despite_client_override() -> Result<()> {
-    assert_command_exec_apply_patch_rollout(
-        CommandExecApplyPatchRollout::Enabled,
-        "0",
-        b"after\r\n",
-    )
-    .await
-}
-
-#[tokio::test]
-async fn command_exec_apply_patch_normalizes_line_endings_despite_stale_overrides() -> Result<()> {
-    assert_command_exec_apply_patch_rollout(CommandExecApplyPatchRollout::Disabled, "1", b"after\n")
-        .await
-}
-
-async fn assert_command_exec_apply_patch_rollout(
-    rollout: CommandExecApplyPatchRollout,
-    client_override: &str,
-    expected_contents: &[u8],
-) -> Result<()> {
+async fn command_exec_apply_patch_preserves_line_endings_by_default() -> Result<()> {
     let server = create_mock_responses_server_sequence_unchecked(Vec::new()).await;
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri(), "never")?;
-
-    let feature_enabled = matches!(rollout, CommandExecApplyPatchRollout::Enabled);
-    insert_command_exec_config(
-        codex_home.path(),
-        &format!("[features]\napply_patch_preserve_line_endings = {feature_enabled}\n"),
-    )?;
 
     let workspace = TempDir::new()?;
     let file_path = workspace.path().join("crlf.txt");
@@ -262,7 +232,7 @@ async fn assert_command_exec_apply_patch_rollout(
             cwd: Some(workspace.path().to_path_buf()),
             env: Some(HashMap::from([(
                 CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS_ENV_VAR.to_string(),
-                Some(client_override.to_string()),
+                Some("0".to_string()),
             )])),
             size: None,
             sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
@@ -279,7 +249,7 @@ async fn assert_command_exec_apply_patch_rollout(
             stderr: String::new(),
         }
     );
-    assert_eq!(std::fs::read(file_path)?, expected_contents);
+    assert_eq!(std::fs::read(file_path)?, b"after\r\n");
     Ok(())
 }
 
@@ -1432,12 +1402,29 @@ enable_socks5 = false
 fn insert_command_exec_config(codex_home: &Path, inserted_config: &str) -> Result<()> {
     let config_path = codex_home.join("config.toml");
     let config = std::fs::read_to_string(&config_path)?;
-    let marker = "\n[model_providers.mock_provider]\n";
-    let (prefix, suffix) = config
-        .split_once(marker)
-        .context("test config should include mock provider table")?;
-    let config = format!("{prefix}\n{inserted_config}{marker}{suffix}");
-    std::fs::write(config_path, config)?;
+    let mut config: toml::Table = config.parse()?;
+    let inserted: toml::Table = inserted_config.parse()?;
+    for (key, value) in inserted {
+        if key == "features" {
+            config
+                .entry(key)
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                .as_table_mut()
+                .context("test features should be a table")?
+                .extend(
+                    value
+                        .as_table()
+                        .context("inserted features should be a table")?
+                        .clone(),
+                );
+        } else {
+            ensure!(
+                config.insert(key.clone(), value).is_none(),
+                "duplicate test config key: {key}"
+            );
+        }
+    }
+    std::fs::write(config_path, toml::to_string(&config)?)?;
     Ok(())
 }
 

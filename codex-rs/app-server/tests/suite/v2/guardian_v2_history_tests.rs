@@ -437,7 +437,7 @@ async fn guardians_retain_evidence_after_compaction_and_resume(
                 .expect("declined tool result");
             assert!(
                 output.to_string().contains(
-                    "This is a review failure, not a determination that the action is unsafe."
+                    "Action not executed: automatic approval review failed, not an unsafe-action determination"
                 ),
                 "tool must not execute: {output}",
             );

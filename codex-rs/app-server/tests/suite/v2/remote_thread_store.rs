@@ -658,5 +658,6 @@ fn create_config_toml_with_thread_store(
             "experimental_thread_store = {{ type = \"in_memory\", id = \"{store_id}\" }}"
         ))
         .disable_feature(Feature::Plugins)
+        .disable_feature(Feature::AgentMessageBoard)
         .write(codex_home)
 }

@@ -1,7 +1,7 @@
 //! Delivers terminal child results and completion activity to the agent tree.
 //!
 //! Sessions capture terminal state; the controller owns routing and completion delivery.
-//! Delivery remains best effort, with tracing recorded only after the parent accepts it.
+//! Delivery remains best effort; metrics distinguish queue acceptance from delivery failure.
 
 use super::LocalAgentControl;
 use super::residency::V2RuntimeGuard;
@@ -130,6 +130,8 @@ impl LocalAgentControl {
                         initiating_thread_id,
                         parent_turn_id,
                         SubAgentActivityItem {
+                            model: None,
+                            reasoning_effort: None,
                             id: format!("subagent-completed-{}", outcome.turn_id),
                             kind: SubAgentActivityKind::Completed,
                             agent_thread_id: outcome.thread_id,
@@ -173,7 +175,7 @@ impl LocalAgentControl {
         );
         let context =
             AgentCommunicationContext::new(AgentCommunicationKind::Result, outcome.thread_id);
-        if let Err(err) = self
+        let delivery = self
             .send_inter_agent_communication(
                 parent_thread_id,
                 communication,
@@ -183,8 +185,18 @@ impl LocalAgentControl {
                     ..Default::default()
                 },
             )
-            .await
-        {
+            .await;
+        if let Some(metrics) = codex_otel::global() {
+            let _ = metrics.counter(
+                "codex.multi_agent.result_delivery",
+                /*inc*/ 1,
+                &[(
+                    "outcome",
+                    if delivery.is_ok() { "queued" } else { "failed" },
+                )],
+            );
+        }
+        if let Err(err) = delivery {
             debug!("failed to notify parent thread {parent_thread_id}: {err}");
             return;
         }

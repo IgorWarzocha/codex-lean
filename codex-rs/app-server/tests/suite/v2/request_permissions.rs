@@ -305,7 +305,8 @@ await tools.request_permissions({permissions: {file_system: {write: ["."]}}});"#
 text(await tools.apply_patch("*** Begin Patch\n*** Add File: first.txt\n+first turn\n*** End Patch"));
 yield_control();
 {barrier}
-text(await tools.apply_patch("*** Begin Patch\n*** Add File: original.txt\n+original turn\n*** End Patch"));"#,
+text(await tools.apply_patch("*** Begin Patch\n*** Add File: original.txt\n+original turn\n*** End Patch"));
+text("original-write-complete");"#,
                         ),
                     ),
                     responses::ev_completed("first-turn"),
@@ -443,12 +444,8 @@ text(await tools.apply_patch("*** Begin Patch\n*** Add File: next.txt\n+next tur
             let requests = mock.requests();
             assert_eq!(requests.len(), 3);
             let output = requests[2].function_call_output("wait-original");
-            assert!(
-                output["output"][0]["text"]
-                    .as_str()
-                    .expect("cell status")
-                    .starts_with("Script completed")
-            );
+            assert_ne!(output["output"]["success"], json!(false));
+            assert!(output.to_string().contains("original-write-complete"));
         }
     }
 

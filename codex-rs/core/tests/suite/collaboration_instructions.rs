@@ -26,7 +26,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
@@ -79,7 +79,6 @@ fn model_with_collaboration_messages(
         persistent_instructions: None,
         tools: None,
         instructions_template: None,
-        instructions_variables: None,
         approvals: None,
         collaboration_modes: None,
         auto_review: None,
@@ -558,7 +557,7 @@ async fn collaboration_instructions_added_on_user_turn() -> Result<()> {
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(test.config.cwd.clone())),
+                environments: Some(local_requests(test.config.cwd.clone())),
                 approval_policy: Some(test.config.permissions.approval_policy.value()),
                 sandbox_policy: Some(test.config.legacy_sandbox_policy()),
                 summary: Some(
@@ -605,7 +604,7 @@ async fn collaboration_instructions_omitted_when_disabled() -> Result<()> {
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(test.config.cwd.clone())),
+                environments: Some(local_requests(test.config.cwd.clone())),
                 approval_policy: Some(test.config.permissions.approval_policy.value()),
                 sandbox_policy: Some(test.config.legacy_sandbox_policy()),
                 summary: Some(
@@ -663,7 +662,7 @@ async fn user_turn_overrides_collaboration_instructions_after_override() -> Resu
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(test.config.cwd.clone())),
+                environments: Some(local_requests(test.config.cwd.clone())),
                 approval_policy: Some(test.config.permissions.approval_policy.value()),
                 sandbox_policy: Some(test.config.legacy_sandbox_policy()),
                 summary: Some(

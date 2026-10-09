@@ -16,7 +16,6 @@ use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
-use codex_app_server_protocol::WarningNotification;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_utils_path_uri::PathUri;
 use core_test_support::responses;
@@ -44,7 +43,7 @@ const DENIED_SKILL_NAME: &str = "demo-plugin:denied";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ExecutorSkillScenario {
-    VisibleWithBudgetWarning,
+    LargeCatalog,
     ExplicitOnly,
     RestrictedPermittedReference,
     RestrictedDeniedReference,
@@ -52,8 +51,8 @@ enum ExecutorSkillScenario {
 }
 
 #[tokio::test]
-async fn selected_executor_root_exposes_plugin_skill_and_forwards_budget_warning() -> Result<()> {
-    exercise_executor_skill(ExecutorSkillScenario::VisibleWithBudgetWarning).await
+async fn selected_executor_root_reads_skills_on_demand_with_large_catalog() -> Result<()> {
+    exercise_executor_skill(ExecutorSkillScenario::LargeCatalog).await
 }
 
 #[tokio::test]
@@ -68,7 +67,8 @@ async fn restricted_executor_skill_can_read_permitted_reference() -> Result<()> 
 
 #[cfg(unix)]
 #[tokio::test]
-async fn restricted_executor_skill_rejects_reference_until_permission_approved() -> Result<()> {
+async fn restricted_executor_skill_rejects_package_escape_even_after_permission_approved()
+-> Result<()> {
     exercise_executor_skill(ExecutorSkillScenario::RestrictedDeniedReference).await
 }
 
@@ -183,14 +183,14 @@ stream_max_retries = 0
     let openai_yaml_path = agents_dir.join("openai.yaml")?;
     let reference_path = reference_dir.join("details.md")?;
     let reference_size = match scenario {
-        ExecutorSkillScenario::VisibleWithBudgetWarning => 600 * 1024,
+        ExecutorSkillScenario::LargeCatalog => 40 * 1024,
         ExecutorSkillScenario::RestrictedPermittedReference
         | ExecutorSkillScenario::RestrictedDeniedReference => 1024,
         ExecutorSkillScenario::ExplicitOnly | ExecutorSkillScenario::RestrictedVisible => 40 * 1024,
     };
     let allow_implicit_invocation = matches!(
         scenario,
-        ExecutorSkillScenario::VisibleWithBudgetWarning | ExecutorSkillScenario::RestrictedVisible
+        ExecutorSkillScenario::LargeCatalog | ExecutorSkillScenario::RestrictedVisible
     );
     let reference_contents = format!("{REFERENCE_MARKER}\n{}", "x".repeat(reference_size));
     tokio::try_join!(
@@ -250,7 +250,7 @@ stream_max_retries = 0
             plugin_dir.to_abs_path()?.join("skills/denied"),
         )?;
     }
-    if scenario == ExecutorSkillScenario::VisibleWithBudgetWarning {
+    if scenario == ExecutorSkillScenario::LargeCatalog {
         futures::stream::iter(0..200)
             .map(|index| {
                 let file_system = file_system.clone();
@@ -298,32 +298,29 @@ stream_max_retries = 0
         )
     };
     let package = locator(&skill_dir);
-    let main_package = if scenario == ExecutorSkillScenario::VisibleWithBudgetWarning {
-        "e0/skills/deploy".to_string()
-    } else {
-        package.clone()
-    };
     let main_resource = locator(&skill_dir.join("SKILL.md")?);
     let reference_resource = locator(&reference_dir.join("details.md")?);
     let tool_response = |call_id: &str, tool: &str, arguments: serde_json::Value| {
+        let command = if tool == "list" {
+            "list".to_string()
+        } else {
+            format!(
+                "read {}",
+                arguments["resource"].as_str().expect("skill resource")
+            )
+        };
         responses::sse(vec![
             responses::ev_response_created(&format!("resp-{call_id}")),
-            responses::ev_function_call_with_namespace(
-                call_id,
-                "skills",
-                tool,
-                &arguments.to_string(),
-            ),
+            responses::ev_custom_tool_call(call_id, "skills", &command),
             responses::ev_completed(&format!("resp-{call_id}")),
         ])
     };
     let mut model_responses = vec![
-        tool_response("list", "list", json!({"authority": {"kind": "executor"}})),
+        tool_response("list", "list", json!({})),
         tool_response(
             "main",
             "read",
             json!({
-                "package": main_package,
                 "resource": main_resource.clone(),
             }),
         ),
@@ -331,11 +328,6 @@ stream_max_retries = 0
             "reference",
             "read",
             json!({
-                "package": package.clone(),
-                "authority": {
-                    "kind": "executor",
-                    "id": authority_id,
-                },
                 "resource": reference_resource.clone(),
             }),
         ),
@@ -371,7 +363,6 @@ stream_max_retries = 0
                 "approved-reference",
                 "read",
                 json!({
-                    "package": package.clone(),
                     "resource": reference_resource.clone(),
                 }),
             ),
@@ -385,7 +376,7 @@ stream_max_retries = 0
         .send_thread_start_request_with_auto_env(ThreadStartParams {
             model: Some("mock-model".to_string()),
             config: match scenario {
-                ExecutorSkillScenario::VisibleWithBudgetWarning => Some(HashMap::from([(
+                ExecutorSkillScenario::LargeCatalog => Some(HashMap::from([(
                     "skills.max_context_tokens".to_string(),
                     json!(1_000),
                 )])),
@@ -451,21 +442,6 @@ stream_max_retries = 0
             )
             .await?;
     }
-    if scenario == ExecutorSkillScenario::VisibleWithBudgetWarning {
-        let is_skills_budget_warning =
-            |message: &str| message.starts_with("Exceeded skills context budget.");
-        let warning = timeout(READ_TIMEOUT, async {
-            loop {
-                let warning: WarningNotification = app_server.read_notification("warning").await?;
-                if is_skills_budget_warning(&warning.message) {
-                    return Ok::<WarningNotification, anyhow::Error>(warning);
-                }
-            }
-        })
-        .await??;
-        assert_eq!(warning.thread_id, Some(thread_id.clone()));
-        assert!(is_skills_budget_warning(&warning.message));
-    }
     timeout(
         READ_TIMEOUT,
         app_server.read_stream_until_notification_message("turn/completed"),
@@ -485,19 +461,11 @@ stream_max_retries = 0
 
     let requests = response_mock.requests();
     let request = &requests[0];
-    if scenario == ExecutorSkillScenario::VisibleWithBudgetWarning {
-        assert!(
-            request
-                .message_input_texts("developer")
-                .iter()
-                .any(|text| text.contains("executor package: e0/skills/deploy"))
-        );
-    }
     assert!(
         request
             .message_input_texts("developer")
             .iter()
-            .any(|text| text.contains(SKILL_NAME))
+            .all(|text| !text.contains(SKILL_NAME))
     );
     let skill_fragments = request
         .message_input_texts("user")
@@ -512,8 +480,7 @@ stream_max_retries = 0
     assert!(skill_fragment.contains(SKILL_MARKER));
     assert!(!skill_fragment.contains(LOCAL_SKILL_MARKER));
     match scenario {
-        ExecutorSkillScenario::VisibleWithBudgetWarning
-        | ExecutorSkillScenario::RestrictedVisible => {
+        ExecutorSkillScenario::LargeCatalog | ExecutorSkillScenario::RestrictedVisible => {
             assert!(!skill_fragment.contains("<resource_access>"));
         }
         ExecutorSkillScenario::ExplicitOnly
@@ -535,128 +502,64 @@ stream_max_retries = 0
             );
         }
     }
-    let list_output = serde_json::from_str::<serde_json::Value>(
-        &requests[1]
-            .function_call_output_text("list")
-            .expect("skills.list output"),
-    )?;
+    let skill_output = |index: usize, call_id: &str| {
+        requests[index]
+            .custom_tool_call_output_content_and_success(call_id)
+            .expect("skills command output")
+            .0
+            .expect("skills command text")
+    };
+    let list_output = skill_output(1, "list");
     match scenario {
-        ExecutorSkillScenario::VisibleWithBudgetWarning
-        | ExecutorSkillScenario::RestrictedVisible => {
-            let deploy_skill = list_output["skills"]
-                .as_array()
-                .and_then(|skills| skills.iter().find(|skill| skill["name"] == SKILL_NAME))
-                .expect("skills.list should include the selected executor skill");
-            assert_eq!(
-                deploy_skill,
-                &json!({
-                    "authority": {"kind": "executor", "id": authority_id},
-                    "package": package,
-                    "name": SKILL_NAME,
-                    "description": "Deploy through the executor.",
-                    "main_resource": main_resource,
-                })
+        ExecutorSkillScenario::LargeCatalog => {
+            assert!(
+                list_output.contains("maximum is 49152 bytes"),
+                "{list_output}"
             );
-            assert!(list_output["skills"].as_array().is_none_or(|skills| {
-                skills
-                    .iter()
-                    .all(|skill| skill["name"] != DENIED_SKILL_NAME)
-            }));
-            if scenario == ExecutorSkillScenario::VisibleWithBudgetWarning {
-                assert!(list_output["next_cursor"].is_string());
-            } else {
-                assert!(list_output["next_cursor"].is_null());
-            }
+        }
+        ExecutorSkillScenario::RestrictedVisible => {
+            assert!(list_output.contains(SKILL_NAME));
+            assert!(list_output.contains("Deploy through the executor."));
+            assert!(!list_output.contains(DENIED_SKILL_NAME));
         }
         ExecutorSkillScenario::ExplicitOnly
         | ExecutorSkillScenario::RestrictedPermittedReference
         | ExecutorSkillScenario::RestrictedDeniedReference => {
-            assert_eq!(list_output["skills"], json!([]));
+            assert!(!list_output.contains("Deploy through the executor."));
         }
     }
-    let main_output = serde_json::from_str::<serde_json::Value>(
-        &requests[2]
-            .function_call_output_text("main")
-            .expect("main skill output"),
-    )?;
-    assert!(
-        main_output["contents"]
-            .as_str()
-            .is_some_and(|contents| contents.contains(SKILL_MARKER))
-    );
-    assert_eq!(
-        main_output["skill_root"],
-        json!(skill_dir.inferred_native_path_string())
-    );
-    let reference_output_text = requests[3]
-        .function_call_output_text("reference")
-        .expect("referenced skill file output");
+    let main_output = skill_output(2, "main");
+    assert!(main_output.contains(SKILL_MARKER), "{main_output}");
+    assert!(!main_output.contains(LOCAL_SKILL_MARKER));
+    assert!(main_output.contains("Skill paths"));
+
+    let reference_output = skill_output(3, "reference");
     if scenario == ExecutorSkillScenario::RestrictedDeniedReference {
-        assert!(reference_output_text.contains("failed to read skill resource"));
-        assert!(!reference_output_text.contains("DENIED_REFERENCE_MARKER"));
-        let approved_reference_output = requests[5]
-            .function_call_output_text("approved-reference")
-            .expect("approved skill reference output");
-        assert!(approved_reference_output.contains(REFERENCE_MARKER));
-        let approved_reference: serde_json::Value =
-            serde_json::from_str(&approved_reference_output)?;
-        let cursor = approved_reference["next_cursor"]
-            .as_str()
-            .expect("approved reference should paginate");
-        let expired = responses::mount_sse_sequence(
-            &server,
-            vec![
-                tool_response(
-                    "expired-reference",
-                    "read",
-                    json!({
-                        "package": package,
-                        "resource": reference_resource,
-                        "cursor": cursor,
-                    }),
-                ),
-                responses::sse(vec![responses::ev_completed("resp-expired-done")]),
-            ],
-        )
-        .await;
-        timeout(
-            READ_TIMEOUT,
-            app_server.start_turn_and_wait_for_completion(TurnStartParams {
-                thread_id,
-                input: vec![UserInput::Text {
-                    text: "Continue after the turn-scoped permission expired.".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
-            }),
-        )
-        .await??;
-        assert_eq!(
-            expired.function_call_output_text("expired-reference"),
-            Some("failed to read skill resource".to_string())
+        assert!(
+            reference_output.contains("Failed to read skill resource"),
+            "{reference_output}"
         );
+        assert!(!reference_output.contains("DENIED_REFERENCE_MARKER"));
+        let approved_reference = skill_output(5, "approved-reference");
+        // Filesystem permission does not authorize crossing a skill package boundary.
+        assert!(
+            approved_reference.contains("skill resource escapes its package"),
+            "{approved_reference}"
+        );
+        assert!(!approved_reference.contains("DENIED_REFERENCE_MARKER"));
+        assert!(!approved_reference.contains(REFERENCE_MARKER));
         return Ok(());
     }
-    let mut reference_output = serde_json::from_str::<serde_json::Value>(&reference_output_text)?;
+
+    let expected_contents = format!("{REFERENCE_MARKER}\n{}", "x".repeat(reference_size));
     assert!(
-        reference_output["contents"]
-            .as_str()
-            .is_some_and(|contents| contents.contains(REFERENCE_MARKER))
+        reference_output.contains(&expected_contents),
+        "{reference_output}"
     );
-    assert_eq!(
-        reference_output["skill_root"],
-        json!(skill_dir.inferred_native_path_string())
-    );
-    assert!(reference_output["next_cursor"].is_string());
+    assert!(reference_output.contains("Sources:"));
 
     if scenario == ExecutorSkillScenario::RestrictedPermittedReference {
-        // 250 tokens gives both byte- and token-based policies a 1200-byte response budget.
-        assert!(reference_output_text.len() <= 1200);
-        let expected_contents = format!("{REFERENCE_MARKER}\n{}", "x".repeat(reference_size));
-        let original_cursor = reference_output["next_cursor"]
-            .as_str()
-            .expect("reference cursor")
-            .to_string();
+        // On-demand selected instructions are atomic even with a small general tool budget.
         let changed_contents = format!("CHANGED_REFERENCE\n{}", "y".repeat(reference_size));
         file_system
             .write_file(
@@ -666,83 +569,15 @@ stream_max_retries = 0
                 /*sandbox*/ None,
             )
             .await?;
-        let mut contents = reference_output["contents"]
-            .as_str()
-            .expect("reference contents")
-            .to_string();
-        while let Some(cursor) = reference_output["next_cursor"].as_str() {
-            let call_id = format!("reference-{}", contents.len());
-            let continuation = responses::mount_sse_sequence(
-                &server,
-                vec![
-                    tool_response(
-                        &call_id,
-                        "read",
-                        json!({
-                            "package": package,
-                            "resource": reference_resource,
-                            "cursor": cursor,
-                        }),
-                    ),
-                    responses::sse(vec![responses::ev_completed(&format!(
-                        "resp-{call_id}-done"
-                    ))]),
-                ],
-            )
-            .await;
-            timeout(
-                READ_TIMEOUT,
-                app_server.start_turn_and_wait_for_completion(TurnStartParams {
-                    thread_id: thread_id.clone(),
-                    input: vec![UserInput::Text {
-                        text: "Continue reading the reference.".to_string(),
-                        text_elements: Vec::new(),
-                    }],
-                    ..Default::default()
-                }),
-            )
-            .await??;
-            let output = continuation
-                .function_call_output_text(&call_id)
-                .expect("continued reference output");
-            assert!(output.len() <= 1200);
-            reference_output = serde_json::from_str(&output)?;
-            let page_contents = reference_output["contents"]
-                .as_str()
-                .expect("continued reference contents");
-            assert!(!page_contents.is_empty());
-            assert_eq!(
-                reference_output,
-                json!({
-                    "resource": reference_resource,
-                    "contents": page_contents,
-                    "skill_root": skill_dir.inferred_native_path_string(),
-                    "next_cursor": reference_output["next_cursor"].as_str(),
-                })
-            );
-            contents.push_str(page_contents);
-            assert!(expected_contents.starts_with(&contents));
-        }
-        assert_eq!(contents, expected_contents);
-
-        let restarted = responses::mount_sse_sequence(
+        let refreshed = responses::mount_sse_sequence(
             &server,
             vec![
                 tool_response(
                     "fresh-reference",
                     "read",
-                    json!({"package": package, "resource": reference_resource}),
+                    json!({"resource": reference_resource}),
                 ),
-                tool_response(
-                    "evicted-reference",
-                    "read",
-                    json!({
-                        "package": package,
-                        "resource": reference_resource,
-                        "cursor": original_cursor,
-                    }),
-                ),
-                responses::sse(vec![responses::ev_completed("resp-restarted-done")]),
+                responses::sse(vec![responses::ev_completed("resp-refreshed-done")]),
             ],
         )
         .await;
@@ -751,26 +586,22 @@ stream_max_retries = 0
             app_server.start_turn_and_wait_for_completion(TurnStartParams {
                 thread_id,
                 input: vec![UserInput::Text {
-                    text: "Read the changed reference, then try its old cursor.".to_string(),
+                    text: "Read the changed reference.".to_string(),
                     text_elements: Vec::new(),
                 }],
                 ..Default::default()
             }),
         )
         .await??;
-        let fresh_output = restarted
-            .function_call_output_text("fresh-reference")
+        let (fresh_output, _) = refreshed
+            .requests()
+            .last()
+            .expect("fresh reference continuation")
+            .custom_tool_call_output_content_and_success("fresh-reference")
             .expect("fresh reference output");
-        assert!(fresh_output.len() <= 1200);
-        let fresh: serde_json::Value = serde_json::from_str(&fresh_output)?;
-        assert!(fresh["contents"].as_str().is_some_and(|page| {
-            page.starts_with("CHANGED_REFERENCE") && changed_contents.starts_with(page)
-        }));
-        assert!(fresh["next_cursor"].is_string());
-        assert_eq!(
-            restarted.function_call_output_text("evicted-reference"),
-            Some("skills.read cursor is stale; restart from the first page".to_string())
-        );
+        let fresh_output = fresh_output.expect("fresh reference text");
+        assert!(fresh_output.contains(&changed_contents));
+        assert!(!fresh_output.contains(REFERENCE_MARKER));
     }
 
     Ok(())

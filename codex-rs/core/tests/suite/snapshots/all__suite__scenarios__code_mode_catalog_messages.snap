@@ -1,19 +1,12 @@
 ---
 source: core/tests/suite/scenarios.rs
-expression: "context_snapshot::format_request_history_snapshot(\"Catalog Code Mode instructions and wait parameter descriptions accompany a yielded cell through completion.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
+expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Catalog Code Mode instructions and wait parameter descriptions accompany a yielded cell through completion.
 
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: Complete the request. Questions only for missing information that changes the work
-    
-    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
-    
-    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
-    
-    Active sandbox and approval policy. No bypasses or repackaged rejected commands
   model: "gpt-6-astra"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
@@ -22,41 +15,46 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=b6d364d7724d4732):
+  tools (5; hash=a42277a1efd1874c):
     - custom/exec: Catalog exec instructions. Default yield: 1234 ms. image(dataUrl | { image_url, detail? } | Image...; hash=baba7fc6842e6fa1
     - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=67bc0f04da3505b3
-    - function/request_user_input: Ask the user; wait for answers; Plan mode only; args=[questions]; hash=8aa27f4c74227619
-    - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=f3a01e11090e9ef6
     - namespace/clock: Read or wait on time; hash=988ad490c20d3305
       - function/sleep
-    - namespace/collaboration: Spawn and manage sub-agents; hash=cfdb23f92902eeb9
+    - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
       - function/followup_task
       - function/interrupt_agent
       - function/list_agents
       - function/send_message
       - function/spawn_agent
-      - function/wait_agent
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
-00:message/developer[2]:
+00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer[2]:
     [01] <permissions instructions>
         `sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled.
         Approval policy: `never`. Do not set `sandbox_permissions`.
         </permissions instructions>
     [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
 
-        `request_user_input`, when available: optional questions that materially improve the work, never approva... one concise plain-text question</collaboration_mode> [hash=509c010a092a8d4a]
-01:message/developer:
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
+02:message/developer:
     <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    `wait_agent`: waits of minutes preferred over busy polling
-
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
-02:message/developer:
+03:message/developer:
     <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
-03:message/user:
+04:message/user:
     <environment_context>
       <cwd><CWD></cwd>
       <shell><HOST_SHELL></shell>
@@ -64,12 +62,12 @@ Settings:
       <timezone><HOST_TIMEZONE></timezone>
       <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="disabled"><...e="unrestricted" /></permission_profile></filesystem> [hash=d40b2f45cb028888]
     </environment_context>
-04:message/user:
+05:message/user:
     Start a code cell, yield its initial output, then wait for its completion.
 -- request 2 (turn) --
-05:custom_tool_call/exec:text('started'); yield_control(); text('finished');
-06:custom_tool_call_output:Script running with cell ID 1
+06:custom_tool_call/exec:text('started'); yield_control(); text('finished');
+07:custom_tool_call_output:Script running with cell ID 1
      | started
 -- request 3 (turn) --
-07:function_call/functions.wait:{"cell_id":"1"}
-08:function_call_output:finished
+08:function_call/functions.wait:{"cell_id":"1"}
+09:function_call_output:finished

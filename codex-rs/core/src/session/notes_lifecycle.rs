@@ -7,7 +7,9 @@ use codex_extension_api::NotesCheckpointTracker;
 use codex_history::RolloutItem;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::protocol::{EventMsg, NotesCheckpoint, TurnCompleteEvent};
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::NotesCheckpoint;
+use codex_protocol::protocol::TurnCompleteEvent;
 use tokio_util::sync::CancellationToken;
 
 use super::session::Session;
@@ -101,6 +103,7 @@ impl Session {
         let checkpoint = self.notes_settlement(turn_context, completed).await;
         let event = TurnCompleteEvent {
             turn_id: turn_context.sub_id.clone(),
+            root_turn_id: Some(turn_context.root_turn_id()),
             notes_checkpoint: Some(checkpoint.clone()),
             last_agent_message,
             error: turn_context.terminal_error.lock().await.clone(),
@@ -148,7 +151,7 @@ impl Session {
                 .or_cancel(cancellation_token)
                 .await??;
             let world_state = Arc::new(
-                self.build_world_state_for_step(&step)
+                self.build_world_state_for_step(&step, /*new_window*/ true)
                     .or_cancel(cancellation_token)
                     .await??,
             );
@@ -158,10 +161,7 @@ impl Session {
             crate::compact_token_budget::run_inline_auto_compact_task(
                 Arc::clone(self),
                 Arc::clone(&step),
-                crate::compact::InitialContextInjection::BeforeLastUserMessage {
-                    world_state,
-                    step_context: step,
-                },
+                world_state,
                 cancellation_token.child_token(),
             )
             .await?;

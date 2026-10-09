@@ -377,12 +377,12 @@ fn portable_tool_schema_normalizes_native_shell_guidance() {
 #[test]
 fn portable_tool_schema_preserves_compact_inventory_signatures() {
     let description = |platform_help: &str, command_type: &str| {
-        codex_code_mode::build_exec_tool_description(
-            &[codex_code_mode::ToolDefinition {
+        codex_code_mode_protocol::build_exec_tool_description(
+            &[codex_code_mode_protocol::ToolDefinition {
                 name: "exec_command".to_string(),
                 tool_name: codex_tools::ToolName::plain("exec_command"),
                 description: platform_help.to_string(),
-                kind: codex_code_mode::CodeModeToolKind::Function,
+                kind: codex_code_mode_protocol::CodeModeToolKind::Function,
                 input_schema: Some(json!({
                     "type": "object",
                     "properties": {
@@ -399,7 +399,8 @@ fn portable_tool_schema_preserves_compact_inventory_signatures() {
             &std::collections::BTreeMap::new(),
             30000,
             true,
-            codex_code_mode::ImageDetailVisibility::Visible,
+            codex_code_mode_protocol::ImageDetailVisibility::Visible,
+            codex_code_mode_protocol::DeferredToolDiscovery::Catalog,
             None,
         )
     };
@@ -712,6 +713,10 @@ fn rewritten_segments_share_one_tag_format_and_keep_compaction_data(
             "You are judging one planned coding-agent action.\nRoutine guidance.",
         ),
         message(
+            "developer",
+            "# Transcript provenance\nRoutine guidance.\n\nYou are judging one planned coding-agent action.",
+        ),
+        message(
             "user",
             "# AGENTS.md instructions for project\n\n<INSTRUCTIONS>\nProject rules\n</INSTRUCTIONS>",
         ),
@@ -728,6 +733,7 @@ fn rewritten_segments_share_one_tag_format_and_keep_compaction_data(
         [
             "<APPS_INSTRUCTIONS>",
             "<PLUGINS_INSTRUCTIONS>",
+            "<GUARDIAN_INSTRUCTIONS>",
             "<GUARDIAN_INSTRUCTIONS>",
             "<AGENTS_MD>",
             "<SUMMARIZATION_PROMPT>",

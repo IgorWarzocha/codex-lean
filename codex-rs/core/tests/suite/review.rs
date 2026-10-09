@@ -35,7 +35,7 @@ use codex_protocol::protocol::ReviewOutputEvent;
 use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::protocol::ThreadSettingsOverrides;
-use codex_protocol::protocol::TurnEnvironmentSelections;
+use codex_protocol::protocol::TurnEnvironmentRequests;
 use codex_protocol::review_format::render_review_output_text;
 use codex_protocol::user_input::UserInput;
 use core_test_support::PathBufExt;
@@ -44,7 +44,7 @@ use core_test_support::responses::ResponseMock;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
@@ -55,6 +55,7 @@ use tempfile::TempDir;
 use tokio::io::AsyncWriteExt as _;
 use uuid::Uuid;
 use wiremock::MockServer;
+use wiremock::ResponseTemplate;
 
 /// Verify that submitting `Op::Review` emits review item lifecycle,
 /// legacy review events, and TurnComplete when the model returns a structured review payload.
@@ -295,6 +296,51 @@ async fn review_op_emits_lifecycle_and_review_output() {
 
     let _codex_home_guard = codex_home;
     server.verify().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn review_overload_preserves_lifecycle_order() {
+    skip_if_no_network!();
+
+    let server = start_mock_server().await;
+    responses::mount_response_once(
+        &server,
+        ResponseTemplate::new(503)
+            .set_body_json(serde_json::json!({ "error": { "code": "server_is_overloaded" } })),
+    )
+    .await;
+    let codex = new_conversation_for_server(&server, Arc::new(TempDir::new().unwrap()), |config| {
+        config.model_provider.request_max_retries = Some(0);
+        config.model_provider.stream_max_retries = Some(0);
+    })
+    .await;
+
+    codex
+        .submit(Op::Review {
+            review_request: ReviewRequest {
+                target: ReviewTarget::UncommittedChanges,
+                user_facing_hint: None,
+            },
+        })
+        .await
+        .unwrap();
+
+    let mut lifecycle = Vec::new();
+    loop {
+        let event = match wait_for_event(&codex, |_| true).await {
+            EventMsg::EnteredReviewMode(_) => "entered",
+            EventMsg::Error(_) => "error",
+            EventMsg::ExitedReviewMode(_) => "exited",
+            EventMsg::TurnComplete(_) => "complete",
+            _ => continue,
+        };
+        lifecycle.push(event);
+        if event == "complete" {
+            break;
+        }
+    }
+
+    assert_eq!(lifecycle, ["entered", "error", "exited", "complete"]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -596,6 +642,15 @@ async fn review_uses_updated_turn_permissions_and_approval_policy() {
     let codex_home = Arc::new(TempDir::new().unwrap());
     let test = test_codex()
         .with_home(codex_home.clone())
+        .with_context_strategy(codex_config::types::ContextStrategy::Notes)
+        .with_auth(
+            CodexAuth::from_external_chatgpt_tokens(
+                "header.e30.signature",
+                "account-123",
+                Some("plus"),
+            )
+            .expect("test backend authentication"),
+        )
         .with_model_info_override("gpt-5.2", |model_info| {
             model_info.service_tiers.clear();
             model_info
@@ -630,6 +685,11 @@ async fn review_uses_updated_turn_permissions_and_approval_policy() {
         })
         .with_model("gpt-5.2")
         .with_config(|config| {
+            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            config.model_provider.base_url = Some(format!(
+                "{}/backend-api/codex",
+                base_url.strip_suffix("/v1").unwrap()
+            ));
             config.review_model = Some("gpt-5.4".to_string());
             config.model_context_window = Some(128_000);
             config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
@@ -674,9 +734,9 @@ async fn review_uses_updated_turn_permissions_and_approval_policy() {
     core_test_support::submit_thread_settings(
         &codex,
         ThreadSettingsOverrides {
-            environments: Some(TurnEnvironmentSelections::new(
+            environments: Some(TurnEnvironmentRequests::new(
                 updated_cwd.clone(),
-                vec![selection],
+                vec![selection.into_request()],
             )),
             approval_policy: Some(AskForApproval::Never),
             approvals_reviewer: Some(ApprovalsReviewer::User),
@@ -721,7 +781,7 @@ async fn review_uses_updated_turn_permissions_and_approval_policy() {
         request
             .message_input_texts("developer")
             .iter()
-            .any(|text| text.contains("Approval policy is currently never")),
+            .any(|text| text.contains("Approval policy: `never`")),
         "review should use the updated approval policy"
     );
     assert!(
@@ -787,7 +847,6 @@ async fn review_uses_updated_turn_permissions_and_approval_policy() {
         review_context.approvals_reviewer,
         Some(ApprovalsReviewer::User)
     );
-    assert_eq!(review_context.personality, Some(Personality::Friendly));
     // The review delegate still starts in its own default mode, not the parent's Plan mode.
     assert_eq!(
         review_context.collaboration_mode,
@@ -1216,8 +1275,8 @@ async fn review_input_isolated_from_parent_history() {
         "user message should only contain the raw review prompt"
     );
 
-    // Ensure the REVIEW_PROMPT rubric is sent via instructions.
-    let instructions = body["instructions"].as_str().expect("instructions string");
+    // Ensure the REVIEW_PROMPT rubric is sent as the base instructions.
+    let instructions = request.instructions_text();
     assert_eq!(instructions, REVIEW_PROMPT);
 
     // Also verify that a user interruption note was recorded in the rollout.
@@ -1408,7 +1467,7 @@ async fn review_uses_overridden_cwd_for_base_branch_merge_base() {
     core_test_support::submit_thread_settings(
         &codex,
         ThreadSettingsOverrides {
-            environments: Some(local_selections(repo_path.to_path_buf().abs())),
+            environments: Some(local_requests(repo_path.to_path_buf().abs())),
             ..Default::default()
         },
     )

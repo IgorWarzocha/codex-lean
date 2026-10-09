@@ -37,6 +37,9 @@ type SuccessfulTlsFallbackServer = (
 
 #[tokio::test]
 async fn default_pool_does_not_retry_a_native_tls_protocol_failure() {
+    if rerun_without_custom_ca("default_pool_does_not_retry_a_native_tls_protocol_failure") {
+        return;
+    }
     let (url, attempts, stop_server) =
         spawn_protocol_version_rejection_server(/*maximum_attempts*/ 2)
             .expect("TLS rejection server should start");
@@ -67,6 +70,9 @@ async fn default_pool_does_not_retry_a_native_tls_protocol_failure() {
 
 #[tokio::test]
 async fn retries_a_native_tls_protocol_failure_once_with_rustls() {
+    if rerun_without_custom_ca("retries_a_native_tls_protocol_failure_once_with_rustls") {
+        return;
+    }
     let (url, attempts, stop_server) =
         spawn_protocol_version_rejection_server(/*maximum_attempts*/ 2)
             .expect("TLS rejection server should start");
@@ -108,6 +114,9 @@ async fn retries_a_native_tls_protocol_failure_once_with_rustls() {
 
 #[tokio::test]
 async fn retries_a_native_tls_failure_after_another_request_caches_rustls() {
+    if rerun_without_custom_ca("retries_a_native_tls_failure_after_another_request_caches_rustls") {
+        return;
+    }
     let (url, attempts, stop_server) =
         spawn_protocol_version_rejection_server(/*maximum_attempts*/ 2)
             .expect("TLS rejection server should start");
@@ -165,6 +174,9 @@ async fn retries_a_native_tls_failure_after_another_request_caches_rustls() {
 
 #[tokio::test]
 async fn does_not_retry_a_cached_rustls_tls_protocol_failure() {
+    if rerun_without_custom_ca("does_not_retry_a_cached_rustls_tls_protocol_failure") {
+        return;
+    }
     let (url, attempts, stop_server) =
         spawn_protocol_version_rejection_server(/*maximum_attempts*/ 2)
             .expect("TLS rejection server should start");
@@ -202,6 +214,11 @@ async fn does_not_retry_a_cached_rustls_tls_protocol_failure() {
 
 #[tokio::test]
 async fn successful_rustls_fallback_replays_the_request_and_reuses_the_destination() {
+    if rerun_without_custom_ca(
+        "successful_rustls_fallback_replays_the_request_and_reuses_the_destination",
+    ) {
+        return;
+    }
     let (url, trusted_rustls_client, observed_requests) =
         spawn_successful_tls_fallback_server().expect("TLS fallback server should start");
     let pool = RouteAwareClientPool::new(
@@ -266,6 +283,11 @@ async fn successful_rustls_fallback_replays_the_request_and_reuses_the_destinati
 
 #[tokio::test]
 async fn retries_a_tls_protocol_failure_when_request_url_contains_certificate_markers() {
+    if rerun_without_custom_ca(
+        "retries_a_tls_protocol_failure_when_request_url_contains_certificate_markers",
+    ) {
+        return;
+    }
     let (url, attempts, stop_server) =
         spawn_protocol_version_rejection_server(/*maximum_attempts*/ 2)
             .expect("TLS rejection server should start");
@@ -297,6 +319,9 @@ async fn retries_a_tls_protocol_failure_when_request_url_contains_certificate_ma
 
 #[tokio::test]
 async fn does_not_retry_a_non_replayable_streaming_request() {
+    if rerun_without_custom_ca("does_not_retry_a_non_replayable_streaming_request") {
+        return;
+    }
     let (url, attempts, stop_server) =
         spawn_protocol_version_rejection_server(/*maximum_attempts*/ 2)
             .expect("TLS rejection server should start");
@@ -337,6 +362,38 @@ async fn does_not_retry_a_non_replayable_streaming_request() {
             .expect("TLS server should reject one connection"),
         1
     );
+}
+
+/// Custom CA configuration deliberately selects Rustls before any fallback. Test
+/// runners may add SSL_CERT_FILE during their own OpenSSL initialization, so these
+/// native-backend cases need an isolated process rather than global env mutation.
+fn rerun_without_custom_ca(test_name: &str) -> bool {
+    if ["CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"]
+        .iter()
+        .all(|name| std::env::var_os(name).is_none_or(|value| value.is_empty()))
+    {
+        return false;
+    }
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("test executable should be available"),
+    )
+    .arg("--exact")
+    .arg(format!(
+        "route_aware_client_pool::tls_fallback_tests::{test_name}"
+    ))
+    .arg("--nocapture")
+    .env_remove("CODEX_CA_CERTIFICATE")
+    .env_remove("SSL_CERT_FILE")
+    .output()
+    .expect("isolated native TLS subprocess should run");
+    assert!(
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"),
+        "{test_name} failed without custom CA configuration\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    true
 }
 
 fn spawn_successful_tls_fallback_server() -> io::Result<SuccessfulTlsFallbackServer> {

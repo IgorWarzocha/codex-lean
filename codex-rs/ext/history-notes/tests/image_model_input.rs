@@ -35,6 +35,10 @@ async fn parallel_exec_history_results_reach_the_next_model_request()
     assert_history_images_reach_the_next_model_request(true).await
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "assertions require successful fixture setup and parsed model-input fields"
+)]
 async fn assert_history_images_reach_the_next_model_request(
     nested: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {

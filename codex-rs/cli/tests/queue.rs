@@ -236,7 +236,7 @@ async fn remote_session_commands_with_workload_identity_use_server_auth() -> Res
     ])
     .await;
     MockResponsesConfig::new(&model.uri())
-        .with_root_config("features.plugins = false\nanalytics.enabled = false")
+        .with_root_config("analytics.enabled = false")
         .with_provider_config("env_key = \"CODEX_QUEUE_SERVER_API_KEY\"")
         .write(codex_home.path())?;
     let _server = TestAppServer::builder()

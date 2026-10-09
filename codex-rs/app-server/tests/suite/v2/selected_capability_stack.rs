@@ -58,9 +58,6 @@ const SKILL_NAME: &str = "executor-demo:deploy";
 const SKILL_DESCRIPTION: &str = "Deploy through the selected executor.";
 const SKILL_BODY_MARKER: &str = "SELECTED_EXECUTOR_SKILL_BODY";
 const LOCAL_SKILL_BODY_MARKER: &str = "COLLIDING_LOCAL_SKILL_BODY";
-const NO_SELECTED_SKILLS_MESSAGE: &str = "No selected-environment skills are currently available.";
-const RESTORED_SELECTED_SKILLS_MESSAGE: &str =
-    "The previously listed selected-environment skills are available again.";
 const MCP_SERVER_NAME: &str = "executor_probe";
 const MCP_CALL_ID: &str = "selected-executor-mcp-call";
 const CONNECTOR_ID: &str = "calendar";
@@ -94,9 +91,12 @@ async fn selected_plugin_mcp_startup_respects_explicit_mentions(
     );
     std::fs::write(config_path, config)?;
     let initialize_barrier = fixture.block_mcp_startup()?;
-    let response_mock = responses::mount_sse_once(
+    let response_mock = responses::mount_sse_sequence(
         &responses_server,
-        create_final_assistant_message_sse_response("Done")?,
+        vec![
+            selected_skill_discovery_response(),
+            create_final_assistant_message_sse_response("Done")?,
+        ],
     )
     .await;
     let mut app_server = TestAppServer::builder()
@@ -172,8 +172,10 @@ async fn selected_plugin_mcp_startup_respects_explicit_mentions(
         app_server.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
-    let request = response_mock.single_request();
-    assert_selected_skill_catalog_available(&request);
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 2);
+    let request = &requests[0];
+    assert_selected_skill_discovered_and_read(&requests[1]);
     assert_eq!(
         request
             .tool_by_name(&format!("mcp__{MCP_SERVER_NAME}"), "echo")
@@ -316,12 +318,23 @@ async fn selected_capability_stack_tracks_environment_selection_and_resume() -> 
         &responses_server,
         vec![
             responses::sse(vec![
+                responses::ev_response_created("initial-skill-discovery"),
+                responses::ev_custom_tool_call("initial-skill-list", "skills", "list"),
+                responses::ev_completed("initial-skill-discovery"),
+            ]),
+            responses::sse(vec![
                 responses::ev_response_created("environment-unavailable"),
                 responses::ev_assistant_message("unavailable-message", "Waiting"),
                 responses::ev_completed("environment-unavailable"),
             ]),
             responses::sse(vec![
                 responses::ev_response_created("environment-available-call"),
+                responses::ev_custom_tool_call("selected-skill-list", "skills", "list"),
+                responses::ev_custom_tool_call(
+                    "selected-skill-read",
+                    "skills",
+                    &format!("read {SKILL_NAME}"),
+                ),
                 responses::ev_function_call_with_namespace(
                     MCP_CALL_ID,
                     &format!("mcp__{MCP_SERVER_NAME}"),
@@ -343,6 +356,11 @@ async fn selected_capability_stack_tracks_environment_selection_and_resume() -> 
                 responses::ev_response_created("unchanged-step"),
                 responses::ev_assistant_message("unchanged-message", "Still ready"),
                 responses::ev_completed("unchanged-step"),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("resumed-skill-discovery"),
+                responses::ev_custom_tool_call("resumed-skill-list", "skills", "list"),
+                responses::ev_completed("resumed-skill-discovery"),
             ]),
             responses::sse(vec![
                 responses::ev_response_created("resumed-unavailable-step"),
@@ -384,7 +402,14 @@ async fn selected_capability_stack_tracks_environment_selection_and_resume() -> 
     )
     .await?;
     let initial_requests = response_mock.requests();
+    assert_eq!(initial_requests.len(), 2);
     assert_selected_capabilities_absent(&initial_requests[0]);
+    assert!(
+        !initial_requests[1]
+            .custom_tool_call_output("initial-skill-list")
+            .to_string()
+            .contains(SKILL_DESCRIPTION)
+    );
 
     let mut exec_server =
         spawn_exec_server(fixture.codex_home.path(), &fixture.exec_server_url).await?;
@@ -445,12 +470,15 @@ async fn selected_capability_stack_tracks_environment_selection_and_resume() -> 
     )
     .await?;
     let requests = response_mock.requests();
-    assert_eq!(5, requests.len());
-    assert_selected_plugin_tools_absent(&requests[4]);
+    assert_eq!(7, requests.len());
+    assert_selected_plugin_tools_absent(&requests[6]);
     assert!(
-        latest_selected_skill_update(&requests[4])
-            .is_some_and(|text| text.contains(NO_SELECTED_SKILLS_MESSAGE))
+        !requests[6]
+            .custom_tool_call_output("resumed-skill-list")
+            .to_string()
+            .contains(SKILL_DESCRIPTION)
     );
+    assert_selected_skill_discovered_and_read(&requests[3]);
 
     exec_server = spawn_exec_server(fixture.codex_home.path(), &fixture.exec_server_url).await?;
     add_environment(&mut app_server, &fixture.exec_server_url).await?;
@@ -469,29 +497,25 @@ async fn selected_capability_stack_tracks_environment_selection_and_resume() -> 
     assert_ne!(first_mcp_pid, resumed_mcp_pid);
 
     let requests = response_mock.requests();
-    assert_eq!(6, requests.len());
-    for request in &requests[1..4] {
+    assert_eq!(8, requests.len());
+    for request in &requests[2..5] {
         assert_selected_skill_is_injected(request, /*expected_count*/ 1);
         assert_selected_plugin_tools(request);
         assert_plugin_guidance_count(request, /*expected_count*/ 0);
     }
-    assert_plugin_guidance_count(&requests[4], /*expected_count*/ 0);
-    assert_selected_skill_is_injected(&requests[5], /*expected_count*/ 2);
-    assert!(
-        latest_selected_skill_update(&requests[5])
-            .is_some_and(|text| text.contains(RESTORED_SELECTED_SKILLS_MESSAGE))
-    );
+    assert_plugin_guidance_count(&requests[6], /*expected_count*/ 0);
+    assert_selected_skill_is_injected(&requests[7], /*expected_count*/ 2);
     assert_eq!(
-        1,
-        requests[5]
+        0,
+        requests[7]
             .message_input_texts("developer")
             .into_iter()
             .filter(|text| text.contains(SKILL_DESCRIPTION))
             .count(),
-        "reattaching should retain the original catalog without repeating it"
+        "selected skills are discovered on demand, not eagerly catalogued"
     );
-    assert_selected_plugin_tools(&requests[5]);
-    let output = requests[2].function_call_output(MCP_CALL_ID);
+    assert_selected_plugin_tools(&requests[7]);
+    let output = requests[3].function_call_output(MCP_CALL_ID);
     let output = output["output"]
         .as_str()
         .expect("MCP function output should be text");
@@ -674,8 +698,6 @@ fn assert_plugin_guidance_count(request: &ResponsesRequest, expected_count: usiz
 }
 
 fn assert_selected_skill_is_injected(request: &ResponsesRequest, expected_count: usize) {
-    assert_selected_skill_catalog_available(request);
-
     let skill_fragments = request
         .message_input_texts("user")
         .into_iter()
@@ -689,27 +711,30 @@ fn assert_selected_skill_is_injected(request: &ResponsesRequest, expected_count:
     }
 }
 
-fn assert_selected_skill_catalog_available(request: &ResponsesRequest) {
-    let latest_update = latest_selected_skill_update(request)
-        .expect("selected skill availability should be model-visible");
-    assert!(!latest_update.contains(NO_SELECTED_SKILLS_MESSAGE));
-    let catalog_fragment = request
-        .message_input_texts("developer")
-        .into_iter()
-        .rfind(|text| text.contains(SKILL_DESCRIPTION))
-        .expect("the full selected skill catalog should remain in history");
-    assert!(catalog_fragment.contains("executor package:"));
+fn selected_skill_discovery_response() -> String {
+    responses::sse(vec![
+        responses::ev_response_created("selected-skill-discovery"),
+        responses::ev_custom_tool_call("selected-skill-list", "skills", "list"),
+        responses::ev_custom_tool_call(
+            "selected-skill-read",
+            "skills",
+            &format!("read {SKILL_NAME}"),
+        ),
+        responses::ev_completed("selected-skill-discovery"),
+    ])
 }
 
-fn latest_selected_skill_update(request: &ResponsesRequest) -> Option<String> {
-    request
-        .message_input_texts("developer")
-        .into_iter()
-        .rfind(|text| {
-            text.contains(SKILL_DESCRIPTION)
-                || text.contains(NO_SELECTED_SKILLS_MESSAGE)
-                || text.contains(RESTORED_SELECTED_SKILLS_MESSAGE)
-        })
+fn assert_selected_skill_discovered_and_read(request: &ResponsesRequest) {
+    let catalog = request
+        .custom_tool_call_output("selected-skill-list")
+        .to_string();
+    assert!(catalog.contains(SKILL_NAME), "{catalog}");
+    assert!(catalog.contains(SKILL_DESCRIPTION), "{catalog}");
+    let read = request
+        .custom_tool_call_output("selected-skill-read")
+        .to_string();
+    assert!(read.contains(SKILL_BODY_MARKER), "{read}");
+    assert!(!read.contains(LOCAL_SKILL_BODY_MARKER), "{read}");
 }
 
 fn assert_selected_plugin_tools(request: &ResponsesRequest) {

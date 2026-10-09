@@ -243,12 +243,13 @@ impl TestAppServer {
         })
     }
 
-    /// Waits for a JSON stderr event whose structured `event.name` field matches.
+    /// Waits up to `timeout` for a JSON stderr event whose structured `event.name` field matches.
     pub async fn wait_for_json_log_event(
         &self,
         event_name: &str,
+        timeout: Duration,
     ) -> anyhow::Result<serde_json::Value> {
-        self.json_logs.wait_for_event(event_name).await
+        self.json_logs.wait_for_event(event_name, timeout).await
     }
 
     async fn new_with_program_env_and_args(
@@ -271,6 +272,32 @@ impl TestAppServer {
             codex_home.join("managed_config.toml"),
         );
         cmd.env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
+        // Ordinary fixtures use local continuity and native tools. Explicit
+        // fixture configuration and later CLI arguments retain their authority.
+        let fixture_config = std::fs::read_to_string(codex_home.join("config.toml"))
+            .unwrap_or_default()
+            .parse::<toml::Table>();
+        if let Ok(config) = fixture_config {
+            if config.get("context_strategy").is_none() {
+                cmd.args(["-c", "context_strategy=\"compaction\""]);
+            }
+            let features = config.get("features");
+            let code_mode = features.and_then(|features| features.get("code_mode"));
+            if code_mode.is_none()
+                && features
+                    .and_then(|features| features.get("code_mode_only"))
+                    .is_none()
+            {
+                cmd.args(["-c", "features.code_mode.enabled=false"]);
+            }
+            if code_mode.and_then(|value| value.get("runtime")).is_none() {
+                cmd.args(["-c", "features.code_mode.runtime=\"v8\""]);
+                // Expanding the boolean shorthand must retain its enablement.
+                if let Some(enabled) = code_mode.and_then(toml::Value::as_bool) {
+                    cmd.args(["-c", &format!("features.code_mode.enabled={enabled}")]);
+                }
+            }
+        }
         cmd.args(args);
 
         for (k, v) in env_overrides {

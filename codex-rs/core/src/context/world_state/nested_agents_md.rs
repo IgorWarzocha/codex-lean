@@ -1,6 +1,7 @@
 use super::PreviousSectionState;
 use super::SectionTransition;
 use super::WorldStateSection;
+use super::WorldStateUpdate;
 use crate::agents_md::nested::NestedAgentsMd;
 use crate::agents_md::nested::NestedInstruction;
 use crate::context::UserInstructions;
@@ -25,10 +26,10 @@ impl WorldStateSection for NestedAgentsMdState {
             PreviousSectionState::Absent | PreviousSectionState::Unknown => None,
         };
         if previous.is_none() && self.0 == NestedAgentsMd::default() {
-            return (None, None);
+            return (None, Vec::new());
         }
         if previous == Some(&self.0) {
-            return (None, None);
+            return (None, Vec::new());
         }
         let mut blocks = Vec::new();
         if let Some(previous) = previous {
@@ -76,7 +77,10 @@ impl WorldStateSection for NestedAgentsMdState {
                 text: blocks.join("\n\n"),
             }) as Box<dyn crate::context::ContextualUserFragment>
         });
-        (Some(self.0.clone()), fragment)
+        (
+            Some(self.0.clone()),
+            WorldStateUpdate::optional_boxed_fragment(fragment),
+        )
     }
 }
 
@@ -87,6 +91,7 @@ fn same_source(left: &NestedInstruction, right: &NestedInstruction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::world_state::test_support::FragmentSectionTestExt;
     use codex_utils_path_uri::PathUri;
 
     #[test]
@@ -99,7 +104,7 @@ mod tests {
                 contents: "use formatter".to_string(),
             }],
         });
-        let (snapshot, fragment) = current.render_diff(PreviousSectionState::Absent);
+        let (snapshot, fragment) = current.render_fragment_diff(PreviousSectionState::Absent);
         let initial = fragment.unwrap();
         assert_eq!(initial.role(), "user");
         assert!(initial.render().contains("only to paths beneath /repo/src"));
@@ -115,13 +120,13 @@ mod tests {
         .unwrap();
         assert!(
             current
-                .render_diff(PreviousSectionState::Known(&restored))
+                .render_fragment_diff(PreviousSectionState::Known(&restored))
                 .1
                 .is_none()
         );
         current.0.entries[0].contents = "new formatter".to_string();
         let update = current
-            .render_diff(PreviousSectionState::Known(&restored))
+            .render_fragment_diff(PreviousSectionState::Known(&restored))
             .1
             .unwrap()
             .render();
@@ -130,7 +135,7 @@ mod tests {
         // A new window has no visible baseline and must receive current guidance again.
         assert!(
             current
-                .render_diff(PreviousSectionState::Absent)
+                .render_fragment_diff(PreviousSectionState::Absent)
                 .1
                 .unwrap()
                 .render()
@@ -139,7 +144,7 @@ mod tests {
         current.0.entries.clear();
         assert!(
             current
-                .render_diff(PreviousSectionState::Known(&restored))
+                .render_fragment_diff(PreviousSectionState::Known(&restored))
                 .1
                 .unwrap()
                 .render()

@@ -137,7 +137,6 @@ async fn default_catalog_compacts_remote_workflow_but_explicit_catalogs_keep_it(
                     Some(crate::model_info::BASE_INSTRUCTIONS.to_string())
                 }
             });
-            selected.instructions_variables = None;
             assert_eq!(actual.model_messages, Some(selected));
         }
     }

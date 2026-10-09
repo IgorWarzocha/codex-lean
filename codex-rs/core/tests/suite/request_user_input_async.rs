@@ -614,7 +614,7 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
                     .iter()
                     .all(|tool| tool["name"] != "request_user_input")
             );
-            let instructions = body["instructions"].as_str().expect("request instructions");
+            let instructions = request.instructions_text();
             let exec = tools
                 .iter()
                 .find(|tool| tool["name"] == "exec")

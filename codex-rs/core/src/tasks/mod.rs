@@ -360,7 +360,11 @@ impl Session {
                 self.input_queue.restore_mailbox(pending_mail).await;
                 return;
             }
-            self.record_started_turn(&turn_context.sub_id).await;
+            self.record_started_turn(
+                &turn_context.sub_id,
+                (task_kind == TaskKind::Regular).then(|| turn_context.attribution()),
+            )
+            .await;
             let turn = active.get_or_insert_with(ActiveTurn::default);
             debug_assert!(turn.task.is_none());
             Arc::clone(&turn.turn_state)
@@ -518,7 +522,7 @@ impl Session {
         self: &Arc<Self>,
         sub_id: String,
     ) {
-        let turn_state = {
+        let (turn_state, previous_options) = {
             let mut active_turn = self.active_turn.lock().await;
             if active_turn.is_some() || !self.input_queue.has_pending_mailbox_items().await {
                 return;
@@ -534,7 +538,8 @@ impl Session {
                 return;
             }
             let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-            Arc::clone(&active_turn.turn_state)
+            let previous_options = self.pending_work_start_options().await;
+            (Arc::clone(&active_turn.turn_state), previous_options)
         };
 
         self.services
@@ -560,6 +565,7 @@ impl Session {
             .any(|mail| mail.communication.trigger_turn)
         {
             // Sleep and child-result continuations retain the previous turn's treatment.
+            start_options = previous_options;
             start_options.cyber_access_program = self
                 .reference_context_item()
                 .await
@@ -578,12 +584,16 @@ impl Session {
             turn_context.turn_metadata_state.set_turn_trigger(trigger);
         }
         if let Some(id) = start_options.parent_turn_id {
-            if let Some(initiating_agent_path) = pending_mail.iter().find_map(|mail| {
-                let communication = &mail.communication;
-                communication
-                    .trigger_turn
-                    .then(|| communication.author.clone())
-            }) {
+            if let Some(initiating_agent_path) = pending_mail
+                .iter()
+                .find_map(|mail| {
+                    let communication = &mail.communication;
+                    communication
+                        .trigger_turn
+                        .then(|| communication.author.clone())
+                })
+                .or(start_options.initiating_agent_path)
+            {
                 turn_context
                     .turn_metadata_state
                     .set_initiating_agent_path(initiating_agent_path);
@@ -640,6 +650,10 @@ impl Session {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "block completion wake atomically with removing the active turn"
+    )]
     pub(crate) async fn abort_turn_if_active(
         self: &Arc<Self>,
         turn_id: &str,
@@ -697,6 +711,10 @@ impl Session {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "failed turn cleanup must block completion wake before releasing its reservation"
+    )]
     pub async fn on_task_finished(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
@@ -900,6 +918,7 @@ impl Session {
             self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
                 .await;
             EventMsg::TurnAborted(TurnAbortedEvent {
+                root_turn_id: Some(turn_context.root_turn_id()),
                 turn_id: Some(turn_context.sub_id.clone()),
                 reason,
                 error: None,
@@ -929,6 +948,7 @@ impl Session {
                 None
             };
             EventMsg::TurnComplete(TurnCompleteEvent {
+                root_turn_id: Some(turn_context.root_turn_id()),
                 turn_id: turn_context.sub_id.clone(),
                 notes_checkpoint,
                 last_agent_message,
@@ -984,6 +1004,10 @@ impl Session {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "Stop and active turn removal share the reservation lock"
+    )]
     async fn take_active_turn(&self, reason: &TurnAbortReason) -> Option<ActiveTurn> {
         let mut active = self.active_turn.lock().await;
         if matches!(
@@ -1113,6 +1137,7 @@ impl Session {
         self.emit_turn_abort_lifecycle(reason.clone(), task.turn_context.extension_data.as_ref())
             .await;
         let event = EventMsg::TurnAborted(TurnAbortedEvent {
+            root_turn_id: Some(task.turn_context.root_turn_id()),
             turn_id: Some(task.turn_context.sub_id.clone()),
             reason,
             error,

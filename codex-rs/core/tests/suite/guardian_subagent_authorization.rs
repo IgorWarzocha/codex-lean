@@ -1065,9 +1065,24 @@ async fn run_guardian_subagent_review(
             _ => false,
         }));
     }
+    if messaging_case && !code_mode {
+        // Saved client history is not a delivered messaging-tool question. Record
+        // it before the authorization turn so the reviewer actually encounters it.
+        root_history_items.extend([
+            serde_json::from_value(json!({
+                "type": "function_call", "call_id": "unsent-question",
+                "namespace": messaging_namespace, "name": messaging_tool,
+                "arguments": json!({"text": ORIGINAL_QUESTION}).to_string()
+            }))?,
+            serde_json::from_value(json!({
+                "type": "function_call_output", "call_id": "unsent-question",
+                "output": "Not delivered: saved client history only."
+            }))?,
+        ]);
+    }
     test.codex.inject_response_items(root_history_items).await?;
 
-    mount_sse_once_match(
+    let root_authorization_request = mount_sse_once_match(
         &server,
         move |request: &wiremock::Request| {
             is_root_request(request, root_thread_id)
@@ -1215,6 +1230,9 @@ async fn run_guardian_subagent_review(
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    // Completion events precede turn teardown; wait for settled root and worker state.
+    ThreadIdle::wait(&test.codex).await;
+    ThreadIdle::wait(worker_thread.as_ref()).await;
     let answer_message = match root_answer {
         RootAnswer::Complete => Some(GuardianRootMessage::UserInput(format!(
             "assistant: {ROOT_QUESTION}\nuser: {ROOT_ANSWER}\n"
@@ -1270,15 +1288,14 @@ async fn run_guardian_subagent_review(
         }
     };
     if messaging_case && !code_mode {
-        // Keep the unanswered call present at projection time: intervening model
-        // requests may otherwise prune it as an orphaned call.
-        test.codex
-            .inject_response_items(vec![serde_json::from_value(json!({
-                "type": "function_call", "call_id": "unsent-question",
-                "namespace": messaging_namespace, "name": messaging_tool,
-                "arguments": json!({"text": ORIGINAL_QUESTION}).to_string()
-            }))?])
-            .await?;
+        assert!(
+            root_authorization_request
+                .single_request()
+                .inputs_of_type("function_call")
+                .iter()
+                .any(|item| item["call_id"] == "unsent-question"),
+            "the authorization turn must encounter the saved, undelivered question"
+        );
         let history = test.codex.conversation_history_snapshot().await;
         assert!(history.items().any(|item| {
             matches!(item, ResponseItem::FunctionCall { call_id, .. } if call_id == "unsent-question")

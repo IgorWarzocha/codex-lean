@@ -63,11 +63,10 @@ impl SkillProvider for HostSkillProvider {
                     "host skill provider requires a host skills snapshot",
                 ));
             };
+            let package_path = PathUri::from_host_native_path(&request.package.0).ok();
             let Some(skill) = host_snapshot.outcome().skills.iter().find(|skill| {
-                let skill_path = skill.path_to_skills_md.to_string_lossy();
                 host_snapshot.outcome().is_skill_enabled(skill)
-                    && (skill_path == request.package.0
-                        || skill_path.replace('\\', "/") == request.package.0)
+                    && Some(&skill.path_to_skills_md) == package_path.as_ref()
             }) else {
                 return Err(SkillProviderError::new(format!(
                     "host skill resource is not loaded: {}",
@@ -75,7 +74,7 @@ impl SkillProvider for HostSkillProvider {
                 )));
             };
 
-            let main = PathUri::from_abs_path(&skill.path_to_skills_md);
+            let main = &skill.path_to_skills_md;
             let root = main
                 .parent()
                 .ok_or_else(|| SkillProviderError::new("skill has no package directory"))?;
@@ -138,9 +137,15 @@ fn catalog_from_outcome(outcome: &SkillLoadOutcome) -> SkillCatalog {
         if let Some(discovery_path) =
             outcome.skill_discovery_path_for_path(&skill.path_to_skills_md)
         {
-            entry = entry.with_display_path(discovery_path.to_string_lossy().replace('\\', "/"));
+            // Keep the catalog's existing forward-slash display on Windows; lookups use PathUri.
+            entry = entry.with_display_path(
+                discovery_path
+                    .inferred_native_path_string()
+                    .replace('\\', "/"),
+            );
         }
         if let Some(root) = outcome.skill_root_for_path(&skill.path_to_skills_md) {
+            // Alias labels share the display path's separators so catalog rendering stays stable.
             entry = entry.with_alias_root(root.to_string_lossy().replace('\\', "/"));
             if let Some(root_order) = root_order_by_path.get(root.as_path()) {
                 entry = entry.with_alias_root_order(*root_order);
@@ -153,7 +158,8 @@ fn catalog_from_outcome(outcome: &SkillLoadOutcome) -> SkillCatalog {
 }
 
 fn catalog_entry_from_skill(skill: &SkillMetadata, enabled: bool) -> SkillCatalogEntry {
-    let skill_path = skill.path_to_skills_md.to_string_lossy().into_owned();
+    let skill_path = skill.path_to_skills_md.inferred_native_path_string();
+    // Preserve model-visible paths while resource IDs retain the native spelling used by clients.
     let display_path = skill_path.replace('\\', "/");
     let mut entry = SkillCatalogEntry::new(
         SkillPackageId(skill_path.clone()),

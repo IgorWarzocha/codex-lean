@@ -111,6 +111,15 @@ impl MockResponsesConfig {
             extra_config,
         } = self;
         let root_config = root_config.join("\n");
+        let context_config = if root_config
+            .parse::<toml::Table>()
+            .map_err(std::io::Error::other)?
+            .contains_key("context_strategy")
+        {
+            ""
+        } else {
+            "context_strategy = \"compaction\""
+        };
         let provider_config = provider_config.join("\n");
         let extra_config = extra_config.join("\n");
         let feature_entries = features
@@ -121,7 +130,11 @@ impl MockResponsesConfig {
                     .find(|spec| spec.id == feature)
                     .map(|spec| spec.key)
                     .expect("feature should have a config key");
-                format!("{key} = {enabled}")
+                if feature == Feature::CodeMode && !enabled {
+                    format!("{key} = {{ enabled = false, runtime = \"v8\" }}")
+                } else {
+                    format!("{key} = {enabled}")
+                }
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -138,6 +151,7 @@ impl MockResponsesConfig {
 model = "{model}"
 approval_policy = "{approval_policy}"
 sandbox_mode = "{sandbox_mode}"
+{context_config}
 {root_config}
 model_provider = "{provider_id}"
 

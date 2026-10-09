@@ -6,17 +6,19 @@ Scenario: Remote board tools and active-turn notifications share the existing se
 
 ## Window 1
 -- request 1 (request) --
-00:message/user:
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/user:
     This turn will be interrupted during notification setup.
-01:message/developer:
+02:message/developer:
     <turn_aborted>
     Previous turn deliberately interrupted. Unified exec processes may still be running. Aborted tools or commands may have partially executed
     </turn_aborted>
-02:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
 03:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+04:message/developer:
     Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     `wait_agent`: waits of minutes preferred over busy polling
 
     Active-agent limit, including you: 4
@@ -24,15 +26,15 @@ Scenario: Remote board tools and active-turn notifications share the existing se
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 
     In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...on. Use `followup_task` to start work for idle agents [hash=f2bea39efb3d479b]
-04:message/developer:
+05:message/developer:
     <MULTI_AGENT_MODE>
-05:message/user:
-    <ENVIRONMENT_CONTEXT>
 06:message/user:
+    <ENVIRONMENT_CONTEXT>
+07:message/user:
     Post the remote decision.
 -- request 2 (request) --
-07:function_call/collaboration.agent_board:{"action":"post","new_channel_name":"design","text":"A remote decision."}
-08:function_call/collaboration.wait_agent:{}
-09:function_call_output:{"author":"/root","channel_name":"design","created_at":"2026-09-18T12:00:00Z","message_id":"<UUID 1>","thread_id":"<UUID 1>"}
-10:function_call_output:{"message":"Wait completed.","timed_out":false}
-11:agent_message
+08:function_call/collaboration.agent_board:{"action":"post","new_channel_name":"design","text":"A remote decision."}
+09:function_call/collaboration.wait_agent:{}
+10:function_call_output:{"author":"/root","channel_name":"design","created_at":"2026-09-18T12:00:00Z","message_id":"<UUID 1>","thread_id":"<UUID 1>"}
+11:function_call_output:{"message":"Wait completed.","timed_out":false}
+12:agent_message

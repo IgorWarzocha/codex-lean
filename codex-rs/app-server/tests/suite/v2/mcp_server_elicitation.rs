@@ -1485,6 +1485,7 @@ fn write_config_toml(
         format!(
             r#"
 model = "mock-model"
+context_strategy = "compaction"
 approval_policy = "on-request"
 sandbox_mode = "read-only"
 
@@ -1494,6 +1495,10 @@ mcp_oauth_credentials_store = "file"
 
 [features]
 apps = true
+
+[features.code_mode]
+enabled = false
+runtime = "v8"
 
 [model_providers.mock_provider]
 name = "Mock provider for test"

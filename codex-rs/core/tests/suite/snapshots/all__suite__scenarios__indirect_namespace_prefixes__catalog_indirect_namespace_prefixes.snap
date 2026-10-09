@@ -7,7 +7,6 @@ Scenario: Catalog namespace and raw MCP server prefixes annotate embedded docs a
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: <MODEL_INSTRUCTIONS>
   model: "gpt-5.5"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
@@ -16,68 +15,71 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (4; hash=d16279b6e113e223):
-    - custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=c40e8e7e382a5a56
+  tools (3; hash=e766d84bcc330f3a):
+    - custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=347157431b4f86ed
     - function/wait: Resume or terminate a yielded exec cell; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=bdd3586ca3655cd2
-    - function/request_user_input: Ask the user; wait for answers; Plan mode only; args=[questions]; hash=8aa27f4c74227619
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Coordinate sub-agents.
+    <PERMISSIONS_INSTRUCTIONS>
 02:message/developer:
+    Coordinate sub-agents.
+03:message/developer:
     <MULTI_AGENT_MODE>
-03:message/user:
-    <ENVIRONMENT_CONTEXT>
 04:message/user:
+    <ENVIRONMENT_CONTEXT>
+05:message/user:
     Find echo, call it, and list the agents.
 -- request 2 (turn) --
-05:custom_tool_call/exec:
+06:custom_tool_call/exec:
     const descriptions = ["view_image", "collaboration__list_agents", "mcp__reports_one__echo"]
       .map(name => ALL_TOOLS.find(t => t.name === name).description);
     const report = await tools.mcp__reports_one__echo({message: "ping"});
     const agents = await tools.collaboration__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
-06:custom_tool_call_output:{"descriptions":["Functions context.\\n\\nInspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare ...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=21ded8b85c4b00a6]
+07:custom_tool_call_output:{"descriptions":["Functions context.\\n\\nInspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare ...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=62831b5297ae66de]
 
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "prefixes-cleared"
-  tools (4; hash=eac938dfc4213867):
-    ~ custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=969879462aef8560
+  tools (3; hash=8ac37c6d87fa0fd0):
+    ~ custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=973f160ad8f7aa61
 -- request 3 (turn) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Coordinate sub-agents.
+    <PERMISSIONS_INSTRUCTIONS>
 02:message/developer:
+    Coordinate sub-agents.
+03:message/developer:
     <MULTI_AGENT_MODE>
-03:message/user:
-    <ENVIRONMENT_CONTEXT>
 04:message/user:
+    <ENVIRONMENT_CONTEXT>
+05:message/user:
     Find echo, call it, and list the agents.
-05:custom_tool_call/exec:
+06:custom_tool_call/exec:
     const descriptions = ["view_image", "collaboration__list_agents", "mcp__reports_one__echo"]
       .map(name => ALL_TOOLS.find(t => t.name === name).description);
     const report = await tools.mcp__reports_one__echo({message: "ping"});
     const agents = await tools.collaboration__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
-06:custom_tool_call_output:{"descriptions":["Functions context.\\n\\nInspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare ...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=21ded8b85c4b00a6]
-07:message/assistant:
+07:custom_tool_call_output:{"descriptions":["Functions context.\\n\\nInspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare ...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=62831b5297ae66de]
+08:message/assistant:
     Done.
-08:message/developer:
+09:message/developer:
     <MODEL_SWITCH>
-09:message/user:
+10:message/user:
     Find echo again, call it, and list the agents.
 -- request 4 (turn) --
-10:custom_tool_call/exec:
+11:custom_tool_call/exec:
     const descriptions = ["view_image", "collaboration__list_agents", "mcp__reports_one__echo"]
       .map(name => ALL_TOOLS.find(t => t.name === name).description);
     const report = await tools.mcp__reports_one__echo({message: "ping"});
     const agents = await tools.collaboration__list_agents({});
     text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0].agent_name});
 
-11:custom_tool_call_output:{"descriptions":["Inspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare const tools: { view_im...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=39f5bd9453b0d541]
+12:custom_tool_call_output:{"descriptions":["Inspect a local image\\n\\nexec tool declaration:\\n```ts\\ndeclare const tools: { view_im...n;\\n};\\n```"],"echo":"ECHOING: ping","agent":"/root"} [hash=6422c86895c43155]

@@ -1,0 +1,157 @@
+---
+source: core/tests/suite/scenarios_compaction_tests.rs
+expression: "context_snapshot::format_context_snapshot(\"A user invokes /compact through remote compaction, persists the replacement history, then continues in the new window.\",\n&[SnapshotEntry::captured(&requests[0]).labeled(\"Before /compact\"),\nSnapshotEntry::captured(&requests[1]).labeled(\"Remote /compact request\"),\nSnapshotEntry::items(&replacement).labeled(\"Stored replacement before next turn\"),\nSnapshotEntry::captured(&requests[2]).labeled(\"First turn after /compact\"),],\n&ContextSnapshotOptions::default().include_request_settings(),)"
+---
+Scenario: A user invokes /compact through remote compaction, persists the replacement history, then continues in the new window.
+
+## Window 1
+Settings:
+  include: ["reasoning.encrypted_content"]
+  model: "gpt-6-astra"
+  parallel_tool_calls: false
+  prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
+  reasoning: {"context":"all_turns","effort":"low"}
+  store: false
+  stream: true
+  text: {"verbosity":"low"}
+  tool_choice: "auto"
+-- request 1 (turn; Before /compact) --
+00:additional_tools/developer (3; hash=64828fe09df88d01):
+        - namespace/functions; hash=aadab8ba2199fda8
+          - custom/exec
+          - function/wait
+        - namespace/clock: Read or wait on time; hash=988ad490c20d3305
+          - function/sleep
+        - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
+          - function/followup_task
+          - function/interrupt_agent
+          - function/list_agents
+          - function/send_message
+          - function/spawn_agent
+01:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+02:message/developer[2]:
+    [01] <permissions instructions>
+        `sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled.
+        Approval policy: `never`. Do not set `sandbox_permissions`.
+        </permissions instructions>
+    [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
+
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
+03:message/developer:
+    <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
+04:message/developer:
+    <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
+05:message/user:
+    <environment_context>
+      <cwd><CWD></cwd>
+      <shell><HOST_SHELL></shell>
+      <current_date><CURRENT_DATE></current_date>
+      <timezone><HOST_TIMEZONE></timezone>
+      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="disabled"><...e="unrestricted" /></permission_profile></filesystem> [hash=d40b2f45cb028888]
+    </environment_context>
+06:message/user:
+    Plan the release.
+-- request 2 (compaction; Remote /compact request) --
+07:message/assistant:
+    The release plan has three steps.
+08:compaction_trigger
+
+## Window 2 (after request 2: input diverged at item 00)
+Settings: unavailable (items only)
+-- request 3 (items; Stored replacement before next turn) --
+00:message/developer[2]:
+    [01] <permissions instructions>
+        `sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled.
+        Approval policy: `never`. Do not set `sandbox_permissions`.
+        </permissions instructions>
+    [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
+
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
+01:message/developer:
+    <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
+02:message/developer:
+    <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
+03:message/user:
+    <environment_context>
+      <cwd><CWD></cwd>
+      <shell><HOST_SHELL></shell>
+      <current_date><CURRENT_DATE></current_date>
+      <timezone><HOST_TIMEZONE></timezone>
+      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="disabled"><...e="unrestricted" /></permission_profile></filesystem> [hash=d40b2f45cb028888]
+    </environment_context>
+04:message/user:
+    Plan the release.
+05:compaction:encrypted=true; chars=31; hash=8255caf138edede8
+
+## Window 3 (after request 3: input diverged at item 00)
+Settings: same as window 1
+-- request 4 (turn; First turn after /compact) --
+00:additional_tools/developer (3; hash=64828fe09df88d01):
+        - namespace/functions; hash=aadab8ba2199fda8
+          - custom/exec
+          - function/wait
+        - namespace/clock: Read or wait on time; hash=988ad490c20d3305
+          - function/sleep
+        - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
+          - function/followup_task
+          - function/interrupt_agent
+          - function/list_agents
+          - function/send_message
+          - function/spawn_agent
+01:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+02:message/developer[2]:
+    [01] <permissions instructions>
+        `sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled.
+        Approval policy: `never`. Do not set `sandbox_permissions`.
+        </permissions instructions>
+    [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
+
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
+03:message/developer:
+    <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
+    Active-agent limit, including you: 4
+
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
+04:message/developer:
+    <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
+05:message/user:
+    <environment_context>
+      <cwd><CWD></cwd>
+      <shell><HOST_SHELL></shell>
+      <current_date><CURRENT_DATE></current_date>
+      <timezone><HOST_TIMEZONE></timezone>
+      <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="disabled"><...e="unrestricted" /></permission_profile></filesystem> [hash=d40b2f45cb028888]
+    </environment_context>
+06:message/user:
+    Plan the release.
+07:compaction:encrypted=true; chars=31; hash=8255caf138edede8
+08:message/user:
+    Continue with the first step.

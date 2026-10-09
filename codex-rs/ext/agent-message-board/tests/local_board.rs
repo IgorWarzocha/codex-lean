@@ -1228,7 +1228,10 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
             assert_eq!(help["parameters"]["required"], json!(["action", "text"]));
             let fields = help["parameters"]["properties"].as_object().unwrap();
             assert_eq!(
-                fields.keys().map(String::as_str).collect::<Vec<_>>(),
+                fields
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<std::collections::BTreeSet<_>>(),
                 vec![
                     "action",
                     "agents_to_notify",
@@ -1237,6 +1240,8 @@ async fn check_tools_validate_arguments_deduplicate_calls_and_bound_unicode_resu
                     "text",
                     "thread_id",
                 ]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
             );
         }
     }

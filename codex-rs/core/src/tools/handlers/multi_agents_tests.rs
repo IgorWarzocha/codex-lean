@@ -13,7 +13,6 @@ use crate::function_tool::FunctionCallError;
 use crate::init_state_db;
 use crate::local_agent_graph_store_from_state_db;
 use crate::session::step_context::StepContext;
-use crate::session::tests::make_session_and_context;
 use crate::session::tests::update_selected_settings_for_test;
 use crate::session::tests::update_turn_settings_for_test;
 use crate::session::turn_context::TurnContext;
@@ -90,6 +89,13 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+
+async fn make_session_and_context() -> (crate::session::session::Session, TurnContext) {
+    let (session, mut turn) = crate::session::tests::make_session_and_context().await;
+    // Agent lifecycle fixtures use API-key auth, not the remote Notes backend.
+    Arc::make_mut(&mut turn.config).context_strategy = crate::config::ContextStrategy::Compaction;
+    (session, turn)
+}
 
 fn set_agent_control(
     session: &mut crate::session::session::Session,
@@ -316,6 +322,10 @@ async fn spawn_agent_limit_failure_emits_bounded_metric() {
     let (mut session, mut turn) = make_session_and_context().await;
     turn.session_telemetry = turn.session_telemetry.clone().with_metrics(metrics.clone());
     let mut config = (*turn.config).clone();
+    config
+        .features
+        .disable(Feature::MultiAgentV2)
+        .expect("thread-limit fixture requires v1 agent semantics");
     config.agent_max_threads = Some(0);
     config.apps_mcp_product_sku = Some("codex".to_string());
     turn.config = Arc::new(config);
@@ -361,6 +371,8 @@ async fn spawn_agent_limit_failure_emits_bounded_metric() {
             ))
             .collect::<BTreeMap<_, _>>(),
         BTreeMap::from([
+            ("detail".to_string(), "registry_capacity".to_string()),
+            ("error_kind".to_string(), "agent_limit_reached".to_string()),
             ("fork_mode".to_string(), "none".to_string()),
             ("multi_agent_version".to_string(), "v1".to_string()),
             ("product_sku".to_string(), "codex".to_string()),
@@ -924,7 +936,7 @@ async fn multi_agent_v2_full_history_fork_inherits_root_service_tier() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
+async fn multi_agent_v2_spawn_without_history_allows_agent_type_override() {
     let (mut session, mut turn) = make_session_and_context().await;
     let role_name = install_role_with_model_override(&mut turn).await;
     let manager = thread_manager();
@@ -951,17 +963,17 @@ async fn multi_agent_v2_spawn_partial_fork_turns_allows_agent_type_override() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "partial_fork",
+                "task_name": "fresh_agent",
                 "agent_type": role_name,
-                "fork_turns": "1"
+                "fork_turns": "none"
             })),
         ))
         .await
-        .expect("partial fork should allow agent_type overrides");
+        .expect("fresh agent should allow agent_type overrides");
     let (content, _) = expect_text_output(output);
     let result: serde_json::Value =
         serde_json::from_str(&content).expect("spawn_agent result should be json");
-    assert_eq!(result["task_name"], "/root/partial_fork");
+    assert_eq!(result["task_name"], "/root/fresh_agent");
     let agent_id = manager
         .captured_ops()
         .into_iter()
@@ -1177,8 +1189,9 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
             )
     }));
 
+    let step_context = StepContext::for_test(Arc::clone(&turn));
     let world_state = session
-        .build_world_state_for_step(&StepContext::for_test(Arc::clone(&turn)))
+        .build_world_state_for_step(&step_context, /*new_window*/ true)
         .await
         .expect("world state should build");
     assert_eq!(
@@ -1254,8 +1267,10 @@ async fn multi_agent_v2_spawn_rejects_legacy_fork_context() {
     );
 }
 
+#[test_case::test_case("banana"; "invalid string")]
+#[test_case::test_case("0"; "zero turns")]
 #[tokio::test]
-async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string() {
+async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string(fork_turns: &str) {
     let (mut session, mut turn) = make_session_and_context().await;
     let manager = thread_manager();
     let root = manager
@@ -1279,7 +1294,7 @@ async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string() {
             function_payload(json!({
                 "message": "inspect this repo",
                 "task_name": "worker",
-                "fork_turns": "banana"
+                "fork_turns": fork_turns
             })),
         ))
         .await
@@ -1288,49 +1303,7 @@ async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string() {
 
     assert_eq!(
         err,
-        FunctionCallError::RespondToModel(
-            "fork_turns must be `none`, `all`, or a positive integer string".to_string()
-        )
-    );
-}
-
-#[tokio::test]
-async fn multi_agent_v2_spawn_rejects_zero_fork_turns() {
-    let (mut session, mut turn) = make_session_and_context().await;
-    let manager = thread_manager();
-    let root = manager
-        .start_thread(StartThreadOptions::new((*turn.config).clone()))
-        .await
-        .expect("root thread should start");
-    set_agent_control(&mut session, manager.agent_control());
-    session.thread_id = root.thread_id;
-    let mut config = (*turn.config).clone();
-    config
-        .features
-        .enable(Feature::MultiAgentV2)
-        .expect("test config should allow feature update");
-    set_turn_config(&mut turn, config);
-
-    let err = SpawnAgentHandlerV2::default()
-        .handle(invocation(
-            Arc::new(session),
-            Arc::new(turn),
-            "spawn_agent",
-            function_payload(json!({
-                "message": "inspect this repo",
-                "task_name": "worker",
-                "fork_turns": "0"
-            })),
-        ))
-        .await
-        .err()
-        .expect("zero turn count should be rejected");
-
-    assert_eq!(
-        err,
-        FunctionCallError::RespondToModel(
-            "fork_turns must be `none`, `all`, or a positive integer string".to_string()
-        )
+        FunctionCallError::RespondToModel("fork_turns must be `none` or `all`".to_string())
     );
 }
 
@@ -1540,6 +1513,7 @@ async fn multi_agent_v2_list_agents_returns_completed_status() {
         .send_event(
             child_turn.as_ref(),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                root_turn_id: None,
                 turn_id: child_turn.sub_id.clone(),
                 started_at: None,
                 last_agent_message: Some("done".to_string()),
@@ -1978,6 +1952,7 @@ async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn()
         .send_event(
             first_turn.as_ref(),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                root_turn_id: None,
                 turn_id: first_turn.sub_id.clone(),
                 started_at: None,
                 last_agent_message: Some("first done".to_string()),
@@ -2021,6 +1996,7 @@ async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn()
         .send_event(
             second_turn.as_ref(),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                root_turn_id: None,
                 turn_id: second_turn.sub_id.clone(),
                 started_at: None,
                 last_agent_message: Some("second done".to_string()),
@@ -2185,6 +2161,7 @@ async fn multi_agent_v2_interrupted_turn_does_not_notify_parent() {
         .send_event(
             aborted_turn.as_ref(),
             EventMsg::TurnAborted(TurnAbortedEvent {
+                root_turn_id: None,
                 turn_id: Some(aborted_turn.sub_id.clone()),
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
@@ -4030,10 +4007,9 @@ async fn multi_agent_v2_interrupt_agent_accepts_unloaded_task_name_target() {
         .await
         .expect("worker thread should be loaded before removal");
     stale_thread
-        .submit(Op::Shutdown {})
+        .shutdown_and_wait()
         .await
-        .expect("removed worker thread should still accept shutdown");
-    stale_thread.wait_until_terminated().await;
+        .expect("removed worker runtime should shut down through its owned IO");
 
     let output = InterruptAgentHandler
         .handle(invocation(
@@ -4312,6 +4288,10 @@ async fn close_agent_submits_shutdown_and_returns_previous_status() {
 async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtrees_closed() {
     let (_session, turn) = make_session_and_context().await;
     let mut config = turn.config.as_ref().clone();
+    config
+        .features
+        .disable(Feature::MultiAgentV2)
+        .expect("subtree-resume fixture requires v1 agent semantics");
     config.agent_max_depth = 3;
     config
         .permissions

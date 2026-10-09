@@ -35,7 +35,6 @@ async fn catalog_permission_message_loaded_from_remote_models_is_sent() -> Resul
         persistent_instructions: None,
         tools: None,
         instructions_template: None,
-        instructions_variables: None,
         approvals: None,
         collaboration_modes: None,
         auto_review: None,
@@ -109,7 +108,7 @@ async fn catalog_permission_message_loaded_from_remote_models_is_sent() -> Resul
     assert_eq!(
         permissions,
         vec![
-            "<permissions instructions>\nremote catalog permissions: restricted\nApproval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.\n</permissions instructions>"
+            "<permissions instructions>\nremote catalog permissions: restricted\nApproval policy: `never`. Do not set `sandbox_permissions`.\n</permissions instructions>"
                 .to_string()
         ]
     );

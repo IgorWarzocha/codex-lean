@@ -26,10 +26,12 @@ requires_openai_auth = false
 "#,
     )?;
     let server_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .build()
         .await?;
     let client_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .harness_overrides(ConfigOverrides {
             model_provider: Some("client-provider".into()),
@@ -126,6 +128,7 @@ async fn selected_profile_provider_is_explicit() -> Result<()> {
     let profile_path = AbsolutePathBuf::try_from(home.path().join("selected.config.toml"))?;
     std::fs::write(&profile_path, "model_provider = \"openai\"\n")?;
     let config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .loader_overrides(codex_config::LoaderOverrides {
             user_config_path: Some(profile_path),
@@ -149,6 +152,7 @@ async fn required_provider_overrides_oss_history_selection() -> Result<()> {
         "model_provider = 'openai'",
     )?;
     let config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .loader_overrides(
             codex_config::LoaderOverrides::with_managed_config_path_for_tests(

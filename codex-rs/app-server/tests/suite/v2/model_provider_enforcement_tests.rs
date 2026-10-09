@@ -305,7 +305,9 @@ async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
 async fn malformed_system_defaults_do_not_block_existing_thread_turn() -> Result<()> {
     let provider = MockServer::start().await;
     let home = TempDir::new()?;
-    MockResponsesConfig::new(&provider.uri()).write(home.path())?;
+    MockResponsesConfig::new(&provider.uri())
+        .disable_feature(codex_features::Feature::CodeMode)
+        .write(home.path())?;
     let system_config_path = home.path().join("system-config.toml");
     let mut overrides = LoaderOverrides::without_managed_config_for_tests();
     overrides.system_config_path = Some(system_config_path.clone());
@@ -383,6 +385,12 @@ async fn malformed_system_defaults_do_not_block_existing_thread_turn() -> Result
                 && let ServerNotification::TurnCompleted(completed) = notification.as_ref()
                 && completed.thread_id == started.thread.id
             {
+                assert_eq!(
+                    completed.turn.status,
+                    codex_app_server_protocol::TurnStatus::Completed,
+                    "existing thread turn failed: {:?}",
+                    completed.turn
+                );
                 return Ok::<(), anyhow::Error>(());
             }
         }

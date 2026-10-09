@@ -38,8 +38,11 @@ fn warns_when_code_mode_only_is_enabled_without_model_selector() {
 
 #[test]
 fn does_not_warn_when_code_mode_is_disabled() {
+    let mut features = Features::with_defaults();
+    features.disable(Feature::CodeMode);
+    features.disable(Feature::CodeModeOnly);
     assert_eq!(
-        unsupported_code_mode_warning(&known_model_info(), &Features::with_defaults()),
+        unsupported_code_mode_warning(&known_model_info(), &features),
         None
     );
 }

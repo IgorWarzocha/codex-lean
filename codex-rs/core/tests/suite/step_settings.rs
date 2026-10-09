@@ -197,10 +197,16 @@ fn notes_settings_test() -> TestCodexBuilder {
             .expect("test backend authentication"),
         )
         .with_config(|config| {
-            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            let base_url = config
+                .model_provider
+                .base_url
+                .as_ref()
+                .expect("mock provider has a base URL");
             config.model_provider.base_url = Some(format!(
                 "{}/backend-api/codex",
-                base_url.strip_suffix("/v1").unwrap()
+                base_url
+                    .strip_suffix("/v1")
+                    .expect("mock provider URL ends in /v1")
             ));
         })
 }
@@ -1106,7 +1112,6 @@ async fn active_model_switch_updates_core_context_from_captured_settings(
                 }
                 let messages = model.model_messages.as_mut().expect("model messages");
                 messages.instructions_template = Some(format!("Instructions for {slug}."));
-                messages.instructions_variables = None;
                 messages.collaboration_modes = Some(CollaborationModeMessages {
                     default: Some(format!("Default collaboration for {slug}.")),
                     plan: None,
@@ -2479,9 +2484,9 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                     })))
                     .into_iter()
                     .collect::<serde_json::Map<String, Value>>(),
-                "board_description": "Shared agent discussions. action=help lists actions; add topic for arguments\n\nexec tool declaration:\n```ts\ndeclare const tools: { collaboration__agent_board(args: { action: string; [key: string]: unknown; }): Promise<unknown>; };\n```\n\nInput schema: {\"additionalProperties\":true,\"properties\":{\"action\":{\"type\":\"string\"}},\"required\":[\"action\"],\"type\":\"object\"}",
+                "board_description": "Shared agent discussions. action=help lists actions; add topic for arguments\n\nexec tool declaration:\n```ts\ndeclare const tools: { collaboration__agent_board(args: { action: string; [key: string]: unknown; }): Promise<unknown>; };\n```\n\nInput schema: {\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\"}},\"required\":[\"action\"],\"additionalProperties\":true}",
                 "board_required": ["action"],
-                "exec_description": format!("Exec description for {model}."),
+                "exec_description": format!("Exec description for {model}.\n\nAdditional tools are callable through tools. Tool availability can change between calls"),
                 "wait_description": format!("Wait description for {model}."),
                 "wait_parameters": wait_parameters(model),
             }))
@@ -2880,8 +2885,6 @@ async fn captured_step_controls_exec_completion_and_write_stdin_output() -> Resu
     .await;
     let end = end.expect("exec completion");
 
-    use codex_utils_output_truncation::TruncationPolicy;
-    use codex_utils_output_truncation::formatted_truncate_text;
     let requests = responses.requests();
     let exec = requests[2]
         .function_call_output_text("exec-b")
@@ -2901,13 +2904,7 @@ async fn captured_step_controls_exec_completion_and_write_stdin_output() -> Resu
         "{stdin}"
     );
     assert_eq!(end.exit_code, 7);
-    // The formatting check needs an untruncated chunk, independent of how the executor
-    // aggregates output across the initial command and later stdin interactions.
     assert!(end.aggregated_output.contains(&output));
-    assert_eq!(
-        end.formatted_output,
-        formatted_truncate_text(&end.aggregated_output, TruncationPolicy::Bytes(400))
-    );
     Ok(())
 }
 

@@ -7,7 +7,6 @@ Scenario: Catalog refreshes append the updated listing once while preserving too
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: Test model instructions.
   model: "visible-model"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
@@ -15,10 +14,9 @@ Settings:
   store: false
   stream: true
   tool_choice: "auto"
-  tools (6; hash=ffe6d7abe2785cf5):
+  tools (5; hash=97bc20c3b8638653):
     - function/exec_command: Run a shell command; output and session ID while running; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=d19c77fa2b71f970
     - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=a4f2b7cc01e55d69
-    - function/request_user_input: Ask the user; wait for answers; Plan mode only; args=[questions]; hash=8aa27f4c74227619
     - function/view_image: Inspect a local image; args=[path]; hash=d30bd322b1f7a5f9
     - namespace/multi_agent_v1: Spawn and manage sub-agents; hash=95436e178ca6b846
       - function/close_agent
@@ -28,7 +26,9 @@ Settings:
       - function/wait_agent
     - web_search; hash=8586237e354ee5ed
 -- request 1 (turn) --
-00:message/developer[2]:
+00:message/developer:
+    Test model instructions.
+01:message/developer[2]:
     [01] <permissions instructions>
         `sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled.
         Approval policy: `never`. Do not set `sandbox_permissions`.
@@ -36,15 +36,15 @@ Settings:
     [02] <model_catalog>
         - `visible-model`: Fast and capable Reasoning efforts: low, medium (default), high. Service tiers: priority.
         </model_catalog>
-01:message/user:
+02:message/user:
     hello
 -- request 2 (turn) --
-02:message/developer:
+03:message/developer:
     <model_catalog>
     - `visible-model`: Updated picker copy Reasoning efforts: low, medium (default), high. Service tiers: priority.
     </model_catalog>
-03:message/user:
+04:message/user:
     after catalog refresh
 -- request 3 (turn) --
-04:message/user:
+05:message/user:
     without another catalog change

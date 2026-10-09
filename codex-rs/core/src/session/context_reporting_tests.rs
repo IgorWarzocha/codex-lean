@@ -146,7 +146,7 @@ async fn usage_recompute_and_overflow_report_captured_model(
     Arc::get_mut(&mut step).expect("unique step").settings = Arc::new(captured);
     let world_state = Arc::new(
         session
-            .build_world_state_for_step(&step)
+            .build_world_state_for_step(&step, /*new_window*/ true)
             .await
             .expect("world state"),
     );

@@ -7,13 +7,6 @@ Scenario: Code Mode keeps resource signatures compact and discovers catalog desc
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: Complete the request. Questions only for missing information that changes the work
-    
-    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
-    
-    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
-    
-    Active sandbox and approval policy. No bypasses or repackaged rejected commands
   model: "gpt-6-astra"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
@@ -22,41 +15,46 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=7c16437bab0b4a5d):
-    - custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=0f7b22380673542b
+  tools (5; hash=2f68868644ecae53):
+    - custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=552a60dca863e8f5
     - function/wait: Resume or terminate a yielded exec cell; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=bdd3586ca3655cd2
-    - function/request_user_input: Ask the user; wait for answers; Plan mode only; args=[questions]; hash=8aa27f4c74227619
-    - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=f3a01e11090e9ef6
     - namespace/clock: Read or wait on time; hash=988ad490c20d3305
       - function/sleep
-    - namespace/collaboration: Spawn and manage sub-agents; hash=cfdb23f92902eeb9
+    - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
       - function/followup_task
       - function/interrupt_agent
       - function/list_agents
       - function/send_message
       - function/spawn_agent
-      - function/wait_agent
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
-00:message/developer[2]:
+00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer[2]:
     [01] <permissions instructions>
         `sandbox_mode`: `danger-full-access`. No filesystem sandbox. Network access: enabled.
         Approval policy: `never`. Do not set `sandbox_permissions`.
         </permissions instructions>
     [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
 
-        `request_user_input`, when available: optional questions that materially improve the work, never approva... one concise plain-text question</collaboration_mode> [hash=509c010a092a8d4a]
-01:message/developer:
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
+02:message/developer:
     <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    `wait_agent`: waits of minutes preferred over busy polling
-
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
-02:message/developer:
+03:message/developer:
     <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
-03:message/user:
+04:message/user:
     <environment_context>
       <cwd><CWD></cwd>
       <shell><HOST_SHELL></shell>
@@ -64,11 +62,11 @@ Settings:
       <timezone><HOST_TIMEZONE></timezone>
       <filesystem><workspace_roots><root><WORKSPACE_ROOT 1></root></workspace_roots><permission_profile type...e="unrestricted" /></permission_profile></filesystem> [hash=0592734c170299c1]
     </environment_context>
-04:message/user:
+05:message/user:
     List the available resources and templates, then read the example note.
 -- request 2 (turn) --
-05:custom_tool_call/exec:text(await tools.list_mcp_resources({"server":"resources"}));
+06:custom_tool_call/exec:text(await tools.list_mcp_resources({"server":"resources"}));
     text(await tools.list_mcp_resource_templates({"server":"resources"}));
     text(await tools.read_mcp_resource({"server":"resources","uri":"memo://codex/example-note"}));
     text(["list_mcp_resources","list_mcp_resource_templates","read_mcp_resource"].map(name => ALL_TOOLS.find(tool => tool.name === name)));
-06:custom_tool_call_output:{"server":"resources","resources":[{"server":"resources","uri":"memo://codex/example-note","name":"examp...ed for integration tests.","mimeType":"text/plain"}]} [hash=75d187638a7af2d4] | {"server":"resources","resourceTemplates":[{"server":"resources","uriTemplate":"memo://codex/{slug}","na... resources used in tests.","mimeType":"text/plain"}]} [hash=b1c7082eb114fc9b] | {"server":"resources","uri":"memo://codex/example-note","contents":[{"uri":"memo://codex/example-note","...mple MCP resource served by the rmcp test server."}]} [hash=45385fc57640b555] | [{"name":"list_mcp_resources","description":"Catalog instructions for list_mcp_resources.\\n\\nexec tool d...quired\\":[\\"server\\",\\"uri\\"],\\"type\\":\\"object\\"}"}] [hash=cd21586a6f51813b]
+07:custom_tool_call_output:{"server":"resources","resources":[{"server":"resources","uri":"memo://codex/example-note","name":"examp...ed for integration tests.","mimeType":"text/plain"}]} [hash=75d187638a7af2d4] | {"server":"resources","resourceTemplates":[{"server":"resources","uriTemplate":"memo://codex/{slug}","na... resources used in tests.","mimeType":"text/plain"}]} [hash=b1c7082eb114fc9b] | {"server":"resources","uri":"memo://codex/example-note","contents":[{"uri":"memo://codex/example-note","...mple MCP resource served by the rmcp test server."}]} [hash=45385fc57640b555] | [{"name":"list_mcp_resources","description":"Catalog instructions for list_mcp_resources.\\n\\nexec tool d..."server\\",\\"uri\\"],\\"additionalProperties\\":false}"}] [hash=6f3da6a26b8dbfbd]

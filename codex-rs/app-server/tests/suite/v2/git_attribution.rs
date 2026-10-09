@@ -48,7 +48,7 @@ const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
 const COMMIT_ATTRIBUTION: &str = "Co-authored-by: Codex <noreply@openai.com>";
 const PR_ATTRIBUTION: &str = "Generated with [Codex](https://openai.com/codex/).";
-const ATTRIBUTION_DISABLED: &str = "attribution is disabled for the current workspace";
+const ATTRIBUTION_DISABLED: &str = "Codex commit/PR attribution disabled for current workspace";
 const LEGACY_COMMIT_ATTRIBUTION_INSTRUCTIONS: &str = "\
 When you write or edit a git commit message, ensure the message ends with this trailer exactly once:
 Co-authored-by: Codex <noreply@openai.com>

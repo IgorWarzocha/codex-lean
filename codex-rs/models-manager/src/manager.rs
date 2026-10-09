@@ -476,7 +476,6 @@ impl ModelsManager for OpenAiModelsManager {
                     if config.base_instructions.is_none() {
                         messages.instructions_template =
                             Some(model_info::BASE_INSTRUCTIONS.to_string());
-                        messages.instructions_variables = None;
                     }
                     selected
                 }

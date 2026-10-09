@@ -43,6 +43,7 @@ fn turn_completed_notification(turn_id: &str, status: TurnStatus) -> ServerNotif
         thread_id: "thread-1".to_string(),
         turn: Turn {
             id: turn_id.to_string(),
+            root_turn_id: None,
             items: Vec::new(),
             items_view: Default::default(),
             status,
@@ -75,6 +76,7 @@ async fn managed_workspace_default_respects_read_only_availability() -> color_ey
             ..LoaderOverrides::without_managed_config_for_tests()
         };
         let config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(codex_home.path().to_path_buf())
             .fallback_cwd(Some(codex_home.path().to_path_buf()))
             .loader_overrides(loader_overrides.clone())
@@ -94,7 +96,7 @@ async fn managed_workspace_default_respects_read_only_availability() -> color_ey
         let client = crate::start_embedded_app_server(
             Default::default(),
             config,
-            Vec::new(),
+            crate::test_support::native_test_config_overrides(),
             loader_overrides,
             /*strict_config*/ false,
             Default::default(),

@@ -9,6 +9,17 @@ pub(crate) use codex_utils_absolute_path::test_support::test_path_buf;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+/// Ordinary API-key fixtures exercise native tools without remote notes storage.
+pub(crate) fn native_test_config_overrides() -> Vec<(String, toml::Value)> {
+    vec![
+        ("context_strategy".into(), "compaction".into()),
+        ("features.code_mode.enabled".into(), false.into()),
+        ("features.code_mode.runtime".into(), "v8".into()),
+        ("features.code_mode_only".into(), false.into()),
+        ("features.multi_agent_v2".into(), false.into()),
+    ]
+}
+
 pub(crate) static TEST_MODEL_PRESETS: LazyLock<Vec<ModelPreset>> = LazyLock::new(|| {
     let mut response = bundled_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));

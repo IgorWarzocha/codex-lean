@@ -127,7 +127,14 @@ impl RouteAwareRequestError {
             if error.to_string() == "tunnel error: proxy authorization required" {
                 return Some(RouteFailureClass::ProxyAuthenticationRequired);
             }
-            source = error.source();
+            // io::Error::source() skips its boxed payload and exposes that
+            // payload's source. Rustls certificate errors have no source, so
+            // inspect the payload itself before advancing the chain.
+            source = error
+                .downcast_ref::<io::Error>()
+                .and_then(io::Error::get_ref)
+                .map(|inner| inner as &(dyn std::error::Error + 'static))
+                .or_else(|| error.source());
         }
 
         match self {

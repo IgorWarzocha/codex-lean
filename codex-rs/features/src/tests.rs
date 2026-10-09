@@ -15,6 +15,16 @@ use toml::Table;
 use toml::Value as TomlValue;
 
 #[test]
+fn guardian_transcript_mode_rejects_invalid_values() {
+    for input in [
+        "[guardianv2]\ntranscript_mode = 'xml'",
+        "[guardianv2]\ntranscript_mode = true",
+    ] {
+        assert!(toml::from_str::<FeaturesToml>(input).is_err());
+    }
+}
+
+#[test]
 fn sleep_tool_config_rejects_unknown_mode() {
     assert!(toml::from_str::<FeaturesToml>("[sleep_tool]\nmode = 'off'").is_err());
 }
@@ -25,7 +35,7 @@ fn under_development_features_require_fork_approval_to_default_on() {
         if matches!(spec.stage, Stage::UnderDevelopment) {
             let approved = matches!(
                 spec.id,
-                Feature::ApplyPatchPreserveLineEndings
+                Feature::InstantInterrupt
                     | Feature::AgentMessageBoard
                     | Feature::CodeMode
                     | Feature::CodeModePrewarm
@@ -43,7 +53,6 @@ fn under_development_features_require_fork_approval_to_default_on() {
 #[test]
 fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
     let approved = [
-        Feature::ApplyPatchPreserveLineEndings,
         Feature::AgentMessageBoard,
         Feature::CodeMode,
         Feature::CodeModePrewarm,
@@ -61,7 +70,6 @@ fn approved_toolkit_defaults_preserve_explicit_opt_outs() {
 
     let features_toml: FeaturesToml = toml::from_str(
         r#"
-apply_patch_preserve_line_endings = false
 agent_message_board = false
 code_mode = false
 code_mode_prewarm = false
@@ -181,13 +189,13 @@ fn codex_apps_mcp_protocol_can_be_enabled_independently_of_generic_mcp() {
 #[test]
 fn default_enabled_features_are_stable_or_fork_approved() {
     for spec in crate::FEATURES {
-        if spec.default_enabled {
+        // Instant interrupts are enabled by default while retaining their development stage.
+        if spec.default_enabled && spec.id != Feature::InstantInterrupt {
             assert!(
                 matches!(spec.stage, Stage::Stable | Stage::Removed)
                     || matches!(
                         spec.id,
-                        Feature::ApplyPatchPreserveLineEndings
-                            | Feature::AgentMessageBoard
+                        Feature::AgentMessageBoard
                             | Feature::CodeMode
                             | Feature::CodeModePrewarm
                             | Feature::MultiAgentV2DynamicTools
@@ -336,6 +344,7 @@ max_recent_non_user_entries = 12
     assert_eq!(
         features.guardianv2,
         Some(FeatureToml::Config(crate::GuardianV2ConfigToml {
+            transcript_mode: None,
             async_classifier_mode: None,
             async_classifier_conversation_token_limit: Some(120_000),
             enabled: Some(true),

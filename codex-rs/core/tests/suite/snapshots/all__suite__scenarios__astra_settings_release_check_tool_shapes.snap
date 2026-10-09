@@ -16,12 +16,10 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=ab232ee77e578bc9):
-        - namespace/functions; hash=b22865d0b67351ce
+00:additional_tools/developer (3; hash=64828fe09df88d01):
+        - namespace/functions; hash=aadab8ba2199fda8
           - custom/exec
           - function/wait
-          - function/request_user_input
-          - function/request_user_input_async
         - namespace/clock: Read or wait on time; hash=988ad490c20d3305
           - function/sleep
         - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
@@ -50,12 +48,10 @@ Settings:
         </collaboration_mode>
 03:message/developer:
     <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     Active-agent limit, including you: 4
 
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-
-    In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...ask` to start work for idle agents</multi_agent_role> [hash=8b6905f4b8be77c2]
+    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
 04:message/developer:
     <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
 05:message/user:

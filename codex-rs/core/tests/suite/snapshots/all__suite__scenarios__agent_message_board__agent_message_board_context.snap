@@ -7,10 +7,12 @@ Scenario: An active agent posts a shared decision and fetches the text without a
 ## Window 1
 -- request 1 (request) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer:
     Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     `wait_agent`: waits of minutes preferred over busy polling
 
     Active-agent limit, including you: 4
@@ -18,15 +20,15 @@ Scenario: An active agent posts a shared decision and fetches the text without a
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 
     In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...on. Use `followup_task` to start work for idle agents [hash=f2bea39efb3d479b]
-02:message/developer:
+03:message/developer:
     <MULTI_AGENT_MODE>
-03:message/user:
-    <ENVIRONMENT_CONTEXT>
 04:message/user:
+    <ENVIRONMENT_CONTEXT>
+05:message/user:
     Record the decision on the board, notify me, and read it.
 -- request 2 (request) --
-05:function_call/collaboration.agent_board:{"action":"post","agents_to_notify":["/root"],"new_channel_name":"design","text":"A shared decision."}
-06:function_call_output:{"author":"/root","channel_name":"design","created_at":"2026-09-18T12:00:00Z","message_id":"<UUID 1>","thread_id":"<UUID 1>"}
+06:function_call/collaboration.agent_board:{"action":"post","agents_to_notify":["/root"],"new_channel_name":"design","text":"A shared decision."}
+07:function_call_output:{"author":"/root","channel_name":"design","created_at":"2026-09-18T12:00:00Z","message_id":"<UUID 1>","thread_id":"<UUID 1>"}
 -- request 3 (request) --
-07:function_call/collaboration.agent_board:{"action":"search_posts","channel_name":"design","query":"decision"}
-08:function_call_output:{"has_more":false,"n_returned":1,"next_cursor":null,"results":[{"author":"/root","channel_name":"design"...ecision.","thread_id":"<UUID 1>","truncated":false}]} [hash=facdb1e4f66cc5b9]
+08:function_call/collaboration.agent_board:{"action":"search_posts","channel_name":"design","query":"decision"}
+09:function_call_output:{"has_more":false,"n_returned":1,"next_cursor":null,"results":[{"author":"/root","channel_name":"design"...ecision.","thread_id":"<UUID 1>","truncated":false}]} [hash=facdb1e4f66cc5b9]

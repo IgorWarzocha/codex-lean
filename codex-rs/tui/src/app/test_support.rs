@@ -29,7 +29,7 @@ pub(crate) async fn make_test_app() -> App {
         local_settings: crate::local_settings::LocalSettings::from(&config),
         config,
         state_db: None,
-        cli_kv_overrides: Vec::new(),
+        cli_kv_overrides: crate::test_support::native_test_config_overrides(),
         harness_overrides: ConfigOverrides::default(),
         loader_overrides: LoaderOverrides::without_managed_config_for_tests(),
         cloud_config_bundle: CloudConfigBundleLoader::default(),

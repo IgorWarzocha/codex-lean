@@ -113,7 +113,7 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
         }]))
         .await
         .expect("start root turn");
-    let codex_core::TurnInputSubmission::Started { turn_id } = submitted else {
+    let codex_core::TurnInputSubmission::Started { turn_id, .. } = submitted else {
         panic!("expected a started root turn");
     };
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnStarted(_))).await;
@@ -194,7 +194,8 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
             .await
             .expect("recover the unfinished turn"),
         codex_core::StartIfIdleSubmission::Started {
-            turn_id: turn_id.clone(),
+            root_turn_id: turn_id.clone(),
+            turn_id: turn_id.clone()
         },
     );
     let completed = wait_for_event(&resumed.codex, |event| {
@@ -347,7 +348,7 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request(v2: bool, marker
         })
         .build(&server)
         .await
-        .unwrap();
+        .expect("configure test feature flags");
     let codex = Arc::clone(&fixture.codex);
 
     codex
@@ -356,12 +357,12 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request(v2: bool, marker
             text_elements: Vec::new(),
         }]))
         .await
-        .unwrap();
+        .expect("submit interruption test turn");
 
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::ExecCommandBegin(_))).await;
 
     tokio::time::sleep(Duration::from_secs_f32(0.1)).await;
-    codex.submit(Op::Interrupt).await.unwrap();
+    codex.submit(Op::Interrupt).await.expect("submit interrupt");
 
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnAborted(_))).await;
 
@@ -371,7 +372,7 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request(v2: bool, marker
             text_elements: Vec::new(),
         }]))
         .await
-        .unwrap();
+        .expect("submit interruption test turn");
 
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -386,5 +387,8 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request(v2: bool, marker
             .any(|text| text.contains("<turn_aborted>")),
         "expected <turn_aborted> marker in follow-up request"
     );
-    codex.submit(Op::CleanBackgroundTerminals).await.unwrap();
+    codex
+        .submit(Op::CleanBackgroundTerminals)
+        .await
+        .expect("clean background terminals");
 }

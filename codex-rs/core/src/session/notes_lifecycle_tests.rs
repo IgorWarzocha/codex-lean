@@ -1,19 +1,29 @@
 use super::*;
-use crate::config::{Config, test_config};
+use crate::config::Config;
+use crate::config::test_config;
 use crate::rollout::recorder::RolloutRecorder;
-use crate::thread_manager::{ForkSnapshot, NewThread, StartThreadOptions, ThreadManager};
-use codex_login::{AuthManager, CodexAuth};
+use crate::thread_manager::ForkSnapshot;
+use crate::thread_manager::NewThread;
+use crate::thread_manager::StartThreadOptions;
+use crate::thread_manager::ThreadManager;
+use codex_login::AuthManager;
+use codex_login::CodexAuth;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::models::ContentItem;
-use codex_protocol::protocol::{
-    ErrorEvent, NotesCheckpoint, ThreadHistoryMode, ThreadRolledBackEvent, TurnAbortedEvent,
-    TurnCompleteEvent, TurnStartedEvent,
-};
-use codex_thread_store::{ForkBoundary, PrepareForkParams};
+use codex_protocol::protocol::ErrorEvent;
+use codex_protocol::protocol::NotesCheckpoint;
+use codex_protocol::protocol::ThreadHistoryMode;
+use codex_protocol::protocol::ThreadRolledBackEvent;
+use codex_protocol::protocol::TurnAbortedEvent;
+use codex_protocol::protocol::TurnCompleteEvent;
+use codex_protocol::protocol::TurnStartedEvent;
+use codex_thread_store::ForkBoundary;
+use codex_thread_store::PrepareForkParams;
 use std::path::Path;
 
 fn started(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+        turn_attribution: None,
         turn_id: turn_id.to_owned(),
         root_turn_id: None,
         trace_id: None,
@@ -40,6 +50,7 @@ fn user(text: &str) -> RolloutItem {
 fn complete(turn_id: &str, checkpoint: Option<NotesCheckpoint>, failed: bool) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
         turn_id: turn_id.to_owned(),
+        root_turn_id: None,
         notes_checkpoint: checkpoint,
         last_agent_message: Some("done".to_owned()),
         error: failed.then(|| ErrorEvent {
@@ -94,6 +105,7 @@ async fn replay_only_reuses_notes_from_the_selected_settled_run() {
             started("cancelled"),
             RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
                 turn_id: Some("cancelled".to_owned()),
+                root_turn_id: None,
                 reason: TurnAbortReason::Interrupted,
                 error: None,
                 started_at: None,
@@ -262,7 +274,7 @@ async fn open_notes_window(session: &Arc<Session>) {
         .expect("capture step");
     let world_state = Arc::new(
         session
-            .build_world_state_for_step(&step)
+            .build_world_state_for_step(&step, /*new_window*/ true)
             .await
             .expect("build world state"),
     );

@@ -922,7 +922,7 @@ generatedImage(result);
     assert!(requests[0].body_contains_text("image_gen__imagegen"));
     let output = requests[1].custom_tool_call_output(call_id);
     assert_eq!(
-        output["output"][1],
+        output["output"][0],
         json!({
             "type": "input_image",
             "image_url": format!("data:image/png;base64,{RESULT}"),
@@ -930,11 +930,11 @@ generatedImage(result);
         })
     );
     assert!(
-        output["output"][2]["text"]
+        output["output"][1]["text"]
             .as_str()
             .is_some_and(|text| text.contains("Generated images are saved"))
     );
-    assert_eq!(output["output"].as_array().map(Vec::len), Some(3));
+    assert_eq!(output["output"].as_array().map(Vec::len), Some(2));
     let image_request = server
         .received_requests()
         .await

@@ -351,8 +351,8 @@ async fn thread_delete_removes_persisted_board_even_with_feature_disabled() -> R
             responses::ev_function_call_with_namespace(
                 "post",
                 "collaboration",
-                "post",
-                &json!({"new_channel_name":"design", "text":"Persist this decision"}).to_string(),
+                "agent_board",
+                &json!({"action":"post", "new_channel_name":"design", "text":"Persist this decision"}).to_string(),
             ),
             responses::ev_completed("post"),
         ]),

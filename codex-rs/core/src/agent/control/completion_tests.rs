@@ -50,6 +50,7 @@ async fn idle_child(
             &turn,
             EventMsg::TurnComplete(TurnCompleteEvent {
                 turn_id: turn.sub_id.clone(),
+                root_turn_id: Some(turn.root_turn_id()),
                 started_at: None,
                 last_agent_message: Some("done".into()),
                 error: None,
@@ -275,6 +276,10 @@ async fn completion_wake_shutdown_cancels_wait_for_parent_runtime_gate() {
 }
 
 #[tokio::test]
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "hold active_turn to block Stop handling while testing its queued eviction reservation"
+)]
 async fn completion_wake_traced_idle_stop_fences_eviction_and_reload() {
     let (home, mut config) = test_config().await;
     config.features.enable(Feature::MultiAgentV2).unwrap();
@@ -359,9 +364,7 @@ async fn completion_wake_traced_lifecycle_route_preserves_trace_carrier() {
             session_loop_termination: resident.io.session_loop_termination.clone(),
         },
         crate::thread_startup_metadata::ThreadStartupMetadata::from(
-            &resident
-                .startup_metadata()
-                .to_session_configured_event(None),
+            &resident.startup_metadata().to_session_configured_event(),
         ),
         resident.rollout_path(),
         resident.session_source.clone(),

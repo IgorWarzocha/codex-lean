@@ -15,6 +15,7 @@ async fn test_server(
 ) -> color_eyre::Result<(TempDir, AppServerSession, String, String)> {
     let codex_home = tempfile::tempdir()?;
     let config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(codex_home.path().to_path_buf())
         .build()
         .await?;
@@ -125,6 +126,7 @@ async fn call_tool(
             ephemeral: Some(true),
             ..ThreadStartParams::default()
         },
+        Features::with_defaults(),
         status_receiver,
         /*app_event_tx*/ None,
     )
@@ -185,6 +187,7 @@ stream_max_retries = 0
         ),
     )?;
     let config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .build()
         .await?;

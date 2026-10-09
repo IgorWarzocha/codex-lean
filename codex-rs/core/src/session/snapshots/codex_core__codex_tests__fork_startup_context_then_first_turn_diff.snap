@@ -7,21 +7,15 @@ Scenario: First request after fork when startup preserves the parent baseline, t
 ## Window 1
 -- request 1 (turn; First Forked Turn Request) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     fork seed
-05:message/developer[2]:
+04:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <COLLABORATION_MODE>
-06:message/user:
+05:message/user:
     after fork

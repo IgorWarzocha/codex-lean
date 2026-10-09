@@ -76,11 +76,22 @@ impl Session {
         items: Vec<ResponseItem>,
         turn_context: &TurnContext,
     ) {
-        let items = items
+        let mut items = items
             .into_iter()
             .map(|item| self.annotate_client_response_item(item))
             .collect::<Vec<_>>();
         let mut active = self.active_turn.lock().await;
+        // Queued client history precedes a later admitted reply, even when an
+        // active turn does not record these items until after that reply arrives.
+        for envelope in &mut items {
+            if matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "assistant")
+                || matches!(&envelope.item, ResponseItem::FunctionCall { .. })
+                || crate::context::is_user_authorization_message(&envelope.item)
+            {
+                envelope.metadata.get_or_insert_default().user_input_order =
+                    Some(self.reserve_user_input_order().await);
+            }
+        }
         if let Some(active_turn) = active.as_mut() {
             self.input_queue
                 .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(

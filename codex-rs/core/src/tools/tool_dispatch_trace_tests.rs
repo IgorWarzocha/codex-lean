@@ -280,7 +280,8 @@ async fn dispatch_lifecycle_trace_records_incompatible_payload_failures() -> any
 #[tokio::test]
 async fn missing_code_mode_wait_traces_only_the_wait_tool_call() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
-    let (mut session, turn) = make_session_and_context().await;
+    let (mut session, mut turn) = make_session_and_context().await;
+    Arc::make_mut(&mut turn.config).code_mode.runtime = codex_features::CodeModeRuntime::V8;
     session.services.code_mode_service = CodeModeService::new(
         session.thread_id,
         Arc::new(MissingCellCodeModeSessionProvider),

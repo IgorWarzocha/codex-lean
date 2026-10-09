@@ -28,7 +28,10 @@ impl SkillToolContext {
             .and_then(|snapshot| {
                 snapshot.outcome().skills.iter().find(|skill| {
                     snapshot.outcome().is_skill_enabled(skill)
-                        && skill.path_to_skills_md.to_string_lossy().replace('\\', "/")
+                        && skill
+                            .path_to_skills_md
+                            .inferred_native_path_string()
+                            .replace('\\', "/")
                             == entry.main_prompt.as_str().replace('\\', "/")
                 })
             })

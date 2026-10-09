@@ -1,0 +1,48 @@
+---
+source: core/tests/suite/scenarios_provider_capabilities.rs
+expression: "context_snapshot::format_request_history_snapshot(\"Custom provider overrides keep unrestricted search cached and enable V2 compaction.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+---
+Scenario: Custom provider overrides keep unrestricted search cached and enable V2 compaction.
+
+## Window 1
+Settings:
+  include: ["reasoning.encrypted_content"]
+  model: "gpt-5.5"
+  parallel_tool_calls: true
+  prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
+  reasoning: {"effort":"medium"}
+  store: false
+  stream: true
+  text: {"verbosity":"low"}
+  tool_choice: "auto"
+  tools (5; hash=ace155ba5f853ead):
+    - function/exec_command: Run a shell command; output and session ID while running; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=d19c77fa2b71f970
+    - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=a4f2b7cc01e55d69
+    - function/view_image: Inspect a local image; args=[detail, path]; hash=c5b0e38afa157cd4
+    - namespace/collaboration: Agent collaboration; hash=69e6269d35c72df2
+      - function/agent_board
+      - function/followup_task
+      - function/interrupt_agent
+      - function/list_agents
+      - function/send_message
+      - function/spawn_agent
+    - web_search; hash=f103e327c6870a46
+-- request 1 (turn) --
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/developer:
+    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
+    Active-agent limit, including you: 4
+
+    In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...on. Use `followup_task` to start work for idle agents [hash=f2bea39efb3d479b]
+03:message/developer:
+    <MULTI_AGENT_MODE>
+04:message/user:
+    <ENVIRONMENT_CONTEXT>
+05:message/user:
+    Check the configuration.
+-- request 2 (compaction) --
+06:compaction_trigger

@@ -148,6 +148,7 @@ async fn daybreak_refusal_offers_enable_for_the_next_turn() {
         FrameRequester::test_dummy(),
     )
     .await;
+    chat.set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     let mut model = crate::test_support::TEST_MODEL_PRESETS[0].clone();
@@ -2204,42 +2205,51 @@ async fn streaming_final_answer_keeps_task_running_state() {
 }
 
 #[tokio::test]
-async fn single_line_final_answer_hides_working_status_snapshot() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.thread_id = Some(ThreadId::new());
+async fn answer_phase_controls_working_status_snapshot() {
+    for (phase, working_visible, snapshot) in [
+        (
+            MessagePhase::FinalAnswer,
+            false,
+            "single_line_final_answer_hides_working_status",
+        ),
+        (
+            MessagePhase::PartialAnswer,
+            true,
+            "single_line_partial_answer_keeps_working_status",
+        ),
+    ] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
+        chat.thread_id = Some(ThreadId::new());
 
-    complete_user_message(&mut chat, "user-1", "count to 1");
-    chat.on_task_started();
-    complete_assistant_message(
-        &mut chat,
-        "msg-final-single-line",
-        "1",
-        Some(MessagePhase::FinalAnswer),
-    );
+        complete_user_message(&mut chat, "user-1", "count to 1");
+        chat.on_task_started();
+        complete_assistant_message(&mut chat, "msg-final-single-line", "1", Some(phase));
 
-    assert!(chat.bottom_pane.is_task_running());
-    assert!(!chat.bottom_pane.status_indicator_visible());
+        assert!(chat.bottom_pane.is_task_running());
+        assert_eq!(chat.bottom_pane.status_indicator_visible(), working_visible);
 
-    let width: u16 = 40;
-    let vt_height: u16 = 10;
-    let ui_height = chat.desired_height(width);
-    let viewport = Rect::new(0, vt_height - ui_height - 1, width, ui_height);
-    let backend = VT100Backend::new(width, vt_height);
-    let mut terminal = crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
-    terminal.set_viewport_area(viewport);
+        let width: u16 = 40;
+        let vt_height: u16 = 10;
+        let ui_height = chat.desired_height(width);
+        let viewport = Rect::new(0, vt_height - ui_height - 1, width, ui_height);
+        let backend = VT100Backend::new(width, vt_height);
+        let mut terminal =
+            crate::custom_terminal::Terminal::with_options(backend).expect("terminal");
+        terminal.set_viewport_area(viewport);
 
-    for lines in drain_insert_history(&mut rx) {
-        crate::insert_history::insert_history_lines(&mut terminal, lines)
-            .expect("insert history lines");
+        for lines in drain_insert_history(&mut rx) {
+            crate::insert_history::insert_history_lines(&mut terminal, lines)
+                .expect("insert history lines");
+        }
+
+        terminal
+            .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
+            .expect("draw final answer");
+        assert_chatwidget_snapshot!(
+            snapshot,
+            normalize_snapshot_paths(terminal.backend().vt100().screen().contents())
+        );
     }
-
-    terminal
-        .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
-        .expect("draw final answer");
-    assert_chatwidget_snapshot!(
-        "single_line_final_answer_hides_working_status",
-        normalize_snapshot_paths(terminal.backend().vt100().screen().contents())
-    );
 }
 
 #[tokio::test]
@@ -2468,23 +2478,29 @@ async fn ui_snapshots_small_heights_idle() {
     }
 }
 
-// Snapshot test: ChatWidget at very small heights (task running)
-// Validates how status + composer are presented within tight space.
+// Running state remains hidden when the terminal is too short to present it.
 #[tokio::test]
-async fn ui_snapshots_small_heights_task_running() {
+async fn ui_small_heights_hide_running_state() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    let (idle_chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    // Activate status line
     handle_turn_started(&mut chat, "turn-1");
     handle_agent_reasoning_delta(&mut chat, "**Thinking**");
     for h in [1u16, 2, 3] {
-        let name = format!("chat_small_running_h{h}");
+        let mut idle_terminal =
+            Terminal::new(TestBackend::new(40, h)).expect("create idle terminal");
+        idle_terminal
+            .draw(|f| idle_chat.render(f.area(), f.buffer_mut()))
+            .expect("draw idle chat");
         let mut terminal = Terminal::new(TestBackend::new(40, h)).expect("create terminal");
         terminal
             .draw(|f| chat.render(f.area(), f.buffer_mut()))
             .expect("draw chat running");
-        assert_chatwidget_snapshot!(name, normalized_backend_snapshot(terminal.backend()));
+        assert_eq!(
+            normalized_backend_snapshot(terminal.backend()),
+            normalized_backend_snapshot(idle_terminal.backend()),
+        );
     }
 }
 
@@ -5008,36 +5024,31 @@ async fn user_prompt_submit_app_server_hook_notifications_render_snapshot() {
 }
 
 #[tokio::test]
-async fn interrupt_hook_events_render_snapshot() {
-    assert_hook_events_snapshot(
-        codex_app_server_protocol::HookEventName::Interrupt,
-        "interrupt:0:/tmp/hooks.json",
-        "cleaning up the interrupted turn",
-        "interrupt_hook_events_render_snapshot",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn pre_tool_use_hook_events_render_snapshot() {
-    assert_hook_events_snapshot(
-        codex_app_server_protocol::HookEventName::PreToolUse,
-        "pre-tool-use:0:/tmp/hooks.json",
-        "warming the shell",
-        "pre_tool_use_hook_events_render_snapshot",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn post_tool_use_hook_events_render_snapshot() {
-    assert_hook_events_snapshot(
-        codex_app_server_protocol::HookEventName::PostToolUse,
-        "post-tool-use:0:/tmp/hooks.json",
-        "warming the shell",
-        "post_tool_use_hook_events_render_snapshot",
-    )
-    .await;
+async fn hook_events_render_consistently() {
+    for (event_name, run_id, status_message) in [
+        (
+            codex_app_server_protocol::HookEventName::Interrupt,
+            "interrupt:0:/tmp/hooks.json",
+            "cleaning up the interrupted turn",
+        ),
+        (
+            codex_app_server_protocol::HookEventName::PreToolUse,
+            "pre-tool-use:0:/tmp/hooks.json",
+            "warming the shell",
+        ),
+        (
+            codex_app_server_protocol::HookEventName::PostToolUse,
+            "post-tool-use:0:/tmp/hooks.json",
+            "warming the shell",
+        ),
+        (
+            codex_app_server_protocol::HookEventName::SessionStart,
+            "session-start:0:/tmp/hooks.json",
+            "warming the shell",
+        ),
+    ] {
+        assert_hook_events(event_name, run_id, status_message).await;
+    }
 }
 
 #[tokio::test]
@@ -5586,17 +5597,6 @@ async fn stopped_hook_hides_model_context_and_preserves_stop_reason_snapshot() {
         "stopped_hook_hides_model_context_and_preserves_stop_reason",
         history
     );
-}
-
-#[tokio::test]
-async fn session_start_hook_events_render_snapshot() {
-    assert_hook_events_snapshot(
-        codex_app_server_protocol::HookEventName::SessionStart,
-        "session-start:0:/tmp/hooks.json",
-        "warming the shell",
-        "session_start_hook_events_render_snapshot",
-    )
-    .await;
 }
 
 fn hook_started_run(

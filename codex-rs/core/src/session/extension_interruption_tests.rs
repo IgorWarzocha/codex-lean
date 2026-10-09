@@ -4,9 +4,11 @@ use super::*;
 use crate::session::SessionIo;
 use crate::session::completed_session_loop_termination;
 use crate::session::tests::HeldStepTask;
-use crate::session::tests::make_session_and_context_with_rx;
+use crate::session::tests::make_session_and_context_with_auth_and_config_and_rx;
 use crate::state::TaskKind;
 use crate::thread_startup_metadata::ThreadStartupMetadata;
+use codex_features::Feature;
+use codex_login::CodexAuth;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::AskForApproval;
@@ -19,7 +21,15 @@ use tokio::sync::watch;
 
 #[tokio::test]
 async fn interrupt_if_no_pending_input_handles_cancelled_submission() {
-    let (session, turn_context, rx_event) = make_session_and_context_with_rx().await;
+    let (session, turn_context, rx_event) = make_session_and_context_with_auth_and_config_and_rx(
+        CodexAuth::from_api_key("Test API Key"),
+        Vec::new(),
+        |config| {
+            // Exercise the thread's submission queue, not V2's manager-owned lifecycle routing.
+            config.features.disable(Feature::MultiAgentV2).unwrap();
+        },
+    )
+    .await;
     session
         .spawn_task(
             Arc::clone(&turn_context),
@@ -66,7 +76,6 @@ async fn interrupt_if_no_pending_input_handles_cancelled_submission() {
             active_permission_profile: None,
             cwd: turn_context.config.cwd.clone(),
             reasoning_effort: None,
-            initial_messages: None,
             network_proxy: None,
             rollout_path: None,
         }),

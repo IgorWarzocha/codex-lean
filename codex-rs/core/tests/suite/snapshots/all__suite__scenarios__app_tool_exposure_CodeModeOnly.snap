@@ -7,7 +7,6 @@ Scenario: A non-deferred connector is called through code mode while another con
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: <MODEL_INSTRUCTIONS>
   model: "gpt-5.5"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
@@ -16,19 +15,20 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (4; hash=9b86e0c4e043ec60):
-    - custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=b4f5c15b1f829a25
+  tools (3; hash=7abc5eafcd2fc18c):
+    - custom/exec: Fresh restricted JavaScript. Source only, no JSON or fences. No console, imports, filesystem, net...; hash=73ebed7d56dfb413
     - function/wait: Resume or terminate a yielded exec cell; args=[cell_id, max_tokens, terminate, yield_time_ms]; hash=bdd3586ca3655cd2
-    - function/request_user_input: Ask the user; wait for answers; Plan mode only; args=[questions]; hash=8aa27f4c74227619
     - web_search; hash=e214d4db1bc49e89
 -- request 1 (turn) --
-00:message/developer[2]:
+00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <APPS_INSTRUCTIONS>
-01:message/user:
-    <ENVIRONMENT_CONTEXT>
 02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
     Look up my calendar.
 -- request 2 (turn) --
-03:custom_tool_call/exec:text((await tools.mcp__codex_apps__calendar__lookup({})).content[0].text);
-04:custom_tool_call_output:calendar-lookup-ok
+04:custom_tool_call/exec:text((await tools.mcp__codex_apps__calendar__lookup({})).content[0].text);
+05:custom_tool_call_output:calendar-lookup-ok

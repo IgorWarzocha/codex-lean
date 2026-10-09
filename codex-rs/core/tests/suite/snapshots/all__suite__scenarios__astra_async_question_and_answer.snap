@@ -6,8 +6,8 @@ Scenario: Astra resumes a recorded async question, keeps working, and receives t
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=8698d94654b1d127):
-        - namespace/functions; hash=e5e92ad7bb731fa8
+00:additional_tools/developer (3; hash=83c54bbc00d45276):
+        - namespace/functions; hash=a5d81ecb09ddc491
           - custom/exec
           - function/wait
         - namespace/clock: Read or wait on time; hash=988ad490c20d3305

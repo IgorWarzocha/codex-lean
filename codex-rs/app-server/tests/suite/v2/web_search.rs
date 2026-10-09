@@ -195,8 +195,8 @@ async fn assert_standalone_web_search_round_trips_output(
         .tool_by_name("web", "run")
         .context("web.run should be sent to the model")?;
     assert_eq!(
-        web_run.pointer("/parameters/properties/time/description"),
-        Some(&json!("Get time for the given UTC offsets."))
+        web_run.pointer("/parameters/properties/time/type"),
+        Some(&json!("array"))
     );
     assert!(
         !has_hosted_web_search(&first_response),

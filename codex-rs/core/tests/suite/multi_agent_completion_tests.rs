@@ -135,7 +135,7 @@ async fn child_completion_resumes_only_unstopped_parent(active: bool, stop: bool
                 text_elements: Vec::new(),
             }]))
             .await?;
-        let codex_protocol::turn_input::TurnInputSubmission::Started { turn_id } = submission
+        let codex_protocol::turn_input::TurnInputSubmission::Started { turn_id, .. } = submission
         else {
             panic!("parent starts independent work while the child runs");
         };
@@ -193,7 +193,7 @@ async fn child_completion_resumes_only_unstopped_parent(active: bool, stop: bool
                 text_elements: Vec::new(),
             }]))
             .await?;
-        let codex_protocol::turn_input::TurnInputSubmission::Started { turn_id } = submission
+        let codex_protocol::turn_input::TurnInputSubmission::Started { turn_id, .. } = submission
         else {
             panic!("stopped parent must be idle");
         };

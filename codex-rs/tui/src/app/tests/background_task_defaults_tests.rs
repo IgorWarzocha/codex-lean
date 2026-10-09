@@ -667,6 +667,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
         "approval_policy = \"never\"\napprovals_reviewer = \"auto_review\"\ndefault_permissions = \":workspace\"\n[permissions.server-only]\nextends = \":read-only\"\n",
     )?;
     let server_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().into())
         .build()
         .await?;
@@ -679,7 +680,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
     let client = crate::start_embedded_app_server(
         codex_arg0::Arg0DispatchPaths::default(),
         server_config,
-        Vec::new(),
+        crate::test_support::native_test_config_overrides(),
         LoaderOverrides::default(),
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),

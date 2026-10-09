@@ -230,7 +230,7 @@ mod tests {
             "required": ["cmd", "required_extension"],
             "additionalProperties": false
         });
-        let usage = tool_usage(&tool("exec_command", schema.clone()));
+        let usage = tool_usage(&tool("exec_command", schema));
         assert!(usage.contains("cmd: string"));
         assert!(usage.contains("required_extension: string"));
         for name in [

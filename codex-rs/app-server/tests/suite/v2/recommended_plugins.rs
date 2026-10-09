@@ -59,6 +59,11 @@ async fn recommended_plugins_after_external_login(
     let server = responses::start_mock_server().await;
     let apps_server = AppsTestServer::mount(&server).await?;
     Mock::given(method("GET"))
+        .and(path("/backend-api/wham/config/bundle"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
         .and(path("/ps/plugins/suggested/codex"))
         .and(query_param("scope", "GLOBAL"))
         .respond_with(
@@ -203,7 +208,7 @@ async fn recommended_plugins_after_external_login(
         recommendations,
         vec![concat!(
             "<recommended_plugins>\n",
-            "Here is a list of plugins that are available but not installed.\n\n",
+            "Available plugins not installed:\n\n",
             "- GitHub (github@openai-curated-remote)\n",
             "</recommended_plugins>",
         )]

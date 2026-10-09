@@ -7,6 +7,15 @@ Scenario: Resolved local MXC selection preserves workspace-write permissions in 
 ## Window 1
 -- request 1 (turn) --
 00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer:
     <permissions instructions>
     `sandbox_mode`: `workspace-write`. Reads allowed. Writes within `cwd` and `writable_roots`. Other writes require approval. Network access: restricted
     Approval policy: `on-request`. Needed access through command approval parameters, not a separate message...d"` with a short approval question in `justification` [hash=6edee554ee91cf66]
@@ -18,7 +27,7 @@ Scenario: Resolved local MXC selection preserves workspace-write permissions in 
     Shell control operators: independently evaluated segments. Approved prefixes do not authorize whole compound commands. Complex syntax may prevent rule matching
      Writable root: `<WORKSPACE_ROOT 1>`
     </permissions instructions>
-01:message/user:
+02:message/user:
     <environment_context>
       <cwd><CWD></cwd>
       <shell><HOST_SHELL></shell>
@@ -26,5 +35,5 @@ Scenario: Resolved local MXC selection preserves workspace-write permissions in 
       <timezone><HOST_TIMEZONE></timezone>
       <filesystem><workspace_roots><root><WORKSPACE_ROOT 1></root></workspace_roots><permission_profile type...ntry></file_system></permission_profile></filesystem> [hash=e9b73aecc0d54647]
     </environment_context>
-02:message/user:
+03:message/user:
     Inspect the sandbox.

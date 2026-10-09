@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::compact::InitialContextInjection;
+use crate::context::ContextualUserFragment;
+use crate::context::DeveloperInstructions;
 use crate::context::world_state::WorldState;
-use crate::context::{ContextualUserFragment, DeveloperInstructions};
 use crate::hook_runtime::PostCompactHookOutcome;
 use crate::hook_runtime::PreCompactHookOutcome;
 use crate::hook_runtime::run_post_compact_hooks;
@@ -11,7 +11,8 @@ use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
-use crate::tasks::{RegularTask, SessionTask};
+use crate::tasks::RegularTask;
+use crate::tasks::SessionTask;
 use codex_analytics::CompactionTrigger;
 use codex_async_utils::OrCancelExt;
 use codex_history::ResponseItemEnvelope;
@@ -58,14 +59,18 @@ pub(crate) async fn run_manual_compact_task(
             return Err(CodexErr::InvalidRequest("Notes checkpoint did not complete successfully. Context was not reset; save notes and retry compact.".to_owned()));
         }
     } else {
-        sess.emit_turn_started(&turn_context).await;
+        sess.emit_turn_started(&turn_context, crate::state::TaskKind::Compact)
+            .await;
     }
 
     // Manual compaction runs outside run_turn, so it captures its own current step.
     let step_context = sess
         .capture_step_context(Arc::clone(&turn_context), &cancellation_token)
         .await?;
-    let world_state = Arc::new(sess.build_world_state_for_step(&step_context).await?);
+    let world_state = Arc::new(
+        sess.build_world_state_for_step(&step_context, /*new_window*/ true)
+            .await?,
+    );
     run_compact_task_inner(
         &sess,
         &step_context,
@@ -84,15 +89,9 @@ pub(crate) async fn run_manual_compact_task(
 pub(crate) async fn run_inline_auto_compact_task(
     sess: Arc<Session>,
     step_context: Arc<StepContext>,
-    initial_context_injection: InitialContextInjection,
+    world_state: Arc<WorldState>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<()> {
-    let world_state = match initial_context_injection {
-        InitialContextInjection::BeforeLastUserMessage { world_state, .. } => world_state,
-        InitialContextInjection::DoNotInject => {
-            Arc::new(sess.build_world_state_for_step(&step_context).await?)
-        }
-    };
     run_compact_task_inner(
         &sess,
         &step_context,

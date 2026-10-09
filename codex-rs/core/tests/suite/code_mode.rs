@@ -921,7 +921,6 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
         vec![
             "exec".to_string(),
             "wait".to_string(),
-            "request_user_input".to_string(),
             "web_search".to_string()
         ]
     );
@@ -1349,6 +1348,8 @@ async fn mcp_code_mode_exclusion_does_not_change_direct_mode_tool_exposure() -> 
                     model.supports_search_tool = supports_search_tool;
                 })
                 .with_config(move |config| {
+                    // Keep unrelated deferred V1 tools available even when all MCP tools are direct.
+                    config.features.enable(Feature::Collab).unwrap();
                     if non_prefixed_mcp_tool_names {
                         config
                             .features
@@ -3610,38 +3611,101 @@ async fn code_mode_complete_call_survives_unrelated_truncation() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_only_guides_all_tools_search_and_calls_deferred_app_tools() -> Result<()> {
+#[test_case(false, None; "control")]
+#[test_case(true, None; "ranked_search")]
+#[test_case(true, Some(30_000); "ranked_search_expanded_schema")]
+async fn code_mode_only_searches_and_calls_deferred_app_tools(
+    ranked_search: bool,
+    schema_max_bytes: Option<usize>,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let apps_server = AppsTestServer::mount_searchable(&server).await?;
+    // On-demand descriptors retain full schema metadata even without an expanded prompt budget.
+    let properties = (0..8)
+        .map(|index| {
+            (
+                format!("option{index}"),
+                serde_json::json!({"$ref": "#/$defs/option"}),
+            )
+        })
+        .chain(std::iter::once((
+            "timezone".to_string(),
+            serde_json::json!({"type": "string"}),
+        )))
+        .collect::<serde_json::Map<_, _>>();
+    let input_schema = serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "$defs": {"option": {"type": "object", "properties": {"term": {"type": "string", "description": format!("{}schema_budget_marker", "reference guidance ".repeat(120))}}}},
+    });
+    let tools = (0..100).map(|index| serde_json::json!({
+        "name": format!("calendar_timezone_option_{index}"),
+        "description": format!("Read timezone option {index}."),
+        "annotations": {"readOnlyHint": true},
+        "inputSchema": if index == 99 { input_schema.clone() } else { serde_json::json!({"type": "object"}) },
+        "_meta": {"connector_id": "calendar", "connector_name": "Calendar", "connector_description": "Plan events and manage your calendar."},
+    })).collect();
+    let apps_server =
+        AppsTestServer::mount_with_tools(&server, Arc::new(Mutex::new(tools))).await?;
     let originating_item_id = "ctc_code_mode_origin";
-    let mut exec_call = ev_custom_tool_call(
-        "call-1",
-        "exec",
+    let lookup = if ranked_search {
+        r#"
+const { tools: matches } = await tools.tool_search({
+  query: "calendar_timezone_option_99", limit: 1,
+});
+const tool = matches[0];
+"#
+    } else {
         r#"
 const tool = ALL_TOOLS.find(
   ({ name }) => name === "mcp__codex_apps__calendar_timezone_option_99"
 );
+"#
+    };
+    let call = r#"
 if (!tool) {
   text(JSON.stringify({ found: false }));
 } else {
   const result = await tools[tool.name]({ timezone: "UTC" });
   text(JSON.stringify({
     found: true,
+    rankedSearchAvailable: typeof tools.tool_search === "function",
+    name: tool.name,
+    hasDeclaration: tool.description.includes("mcp__codex_apps__calendar_timezone_option_99(args:"),
+    hasSchemaDescription: tool.description.includes("schema_budget_marker"),
+    hasNamespacePrefix: tool.description.startsWith("Calendar search context.\n\n"),
+    matchesCatalog: tool.description === ALL_TOOLS.find(({ name }) => name === tool.name)?.description,
     isError: Boolean(result.isError),
     text: result.content?.[0]?.text ?? "",
   }));
 }
-"#,
+"#;
+    let mut exec_call = ev_custom_tool_call(
+        "call-1",
+        "exec",
+        &format!("const tool = load(\"deferredAppTool\");\n{call}"),
     );
     exec_call["item"]["id"] = serde_json::json!(originating_item_id);
     let resp_mock = responses::mount_sse_once(
         &server,
         sse(vec![
             ev_response_created("resp-1"),
-            exec_call,
+            ev_custom_tool_call(
+                "search-1",
+                "exec",
+                &format!("{lookup}\nstore(\"deferredAppTool\", tool ?? null);"),
+            ),
             ev_completed("resp-1"),
+        ]),
+    )
+    .await;
+    let call_mock = responses::mount_sse_once(
+        &server,
+        sse(vec![
+            ev_response_created("resp-2"),
+            exec_call,
+            ev_completed("resp-2"),
         ]),
     )
     .await;
@@ -3649,7 +3713,7 @@ if (!tool) {
         &server,
         sse(vec![
             ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
+            ev_completed("resp-3"),
         ]),
     )
     .await;
@@ -3670,6 +3734,13 @@ if (!tool) {
                 .features
                 .enable(Feature::CodeModeOnly)
                 .expect("test config should allow feature update");
+            config.code_mode.tool_input_schema_max_bytes = schema_max_bytes;
+            if ranked_search {
+                config
+                    .features
+                    .enable(Feature::CodeModeToolSearch)
+                    .expect("ranked Code Mode search should be enabled");
+            }
             let mut model_catalog =
                 bundled_models_response().expect("bundled models.json should parse");
             let model = model_catalog
@@ -3680,9 +3751,21 @@ if (!tool) {
             config.chatgpt_base_url = apps_base_url;
             config.model = Some("gpt-5.5".to_string());
             model.supports_search_tool = true;
+            model
+                .model_messages
+                .as_mut()
+                .expect("model messages")
+                .tools
+                .get_or_insert_with(Default::default)
+                .indirect_description_prefixes = Some(
+                serde_json::from_value(serde_json::json!({
+                    "mcp_servers": {"codex_apps": "  Calendar search context.  "},
+                }))
+                .expect("indirect namespace prefixes"),
+            );
             config.model_catalog = Some(model_catalog);
         });
-    let test = builder.build(&server).await?;
+    let test = builder.build_with_auto_env(&server).await?;
     test.submit_turn("inspect tools in code mode only").await?;
 
     let first_body = resp_mock.single_request().body_json();
@@ -3691,7 +3774,6 @@ if (!tool) {
         vec![
             "exec".to_string(),
             "wait".to_string(),
-            "request_user_input".to_string(),
             "web_search".to_string()
         ]
     );
@@ -3719,6 +3801,8 @@ if (!tool) {
     );
     assert!(exec_description.contains("Read selected entries' description for help and schemas"));
     assert!(!exec_description.contains("Shared MCP Types:"));
+    let has_ranked_search = exec_description.contains("await tools.tool_search(");
+    assert_eq!(has_ranked_search, ranked_search);
     assert!(!exec_description.contains("calendar_timezone_option_99"));
 
     let request = follow_up_mock.single_request();
@@ -3728,15 +3812,26 @@ if (!tool) {
         Some(false),
         "code_mode_only deferred app tool call failed unexpectedly: {output}"
     );
-    let parsed: Value = serde_json::from_str(&output)?;
+    let parsed: Value = serde_json::from_str(&output).unwrap_or_else(|error| {
+        panic!("deferred app call-1 output was not JSON: {error}\n{output}")
+    });
     assert_eq!(
         parsed,
         serde_json::json!({
             "found": true,
+            "rankedSearchAvailable": ranked_search,
+            "name": "mcp__codex_apps__calendar_timezone_option_99",
+            "hasDeclaration": true,
+            "hasSchemaDescription": true,
+            "hasNamespacePrefix": true,
+            "matchesCatalog": true,
             "isError": false,
             "text": "called calendar_timezone_option_99 for  at  with ",
         })
     );
+    assert!(request.inputs_of_type("tool_search_output").is_empty());
+    assert!(request.inputs_of_type("tool_search_call").is_empty());
+    let call_body = call_mock.single_request().body_json();
     let apps_tool_calls = recorded_apps_tool_calls(&server).await;
     assert!(
         apps_tool_calls.iter().any(|call| {
@@ -3744,7 +3839,7 @@ if (!tool) {
                 && call.pointer("/params/_meta/sessionId")
                     == Some(&serde_json::json!(test.session_configured.session_id))
                 && call.pointer("/params/_meta/windowId")
-                    == Some(&first_body["client_metadata"]["x-codex-window-id"])
+                    == Some(&call_body["client_metadata"]["x-codex-window-id"])
         }),
         "the nested MCP call should inherit its code cell's originating Responses item"
     );
@@ -3763,6 +3858,7 @@ async fn app_only_tools_are_not_visible_or_runnable_by_code_mode_model() -> Resu
         r#"
 const visibleTool = ALL_TOOLS.find(({{ name }}) => name === {visible_tool_name:?});
 const tool = ALL_TOOLS.find(({{ name }}) => name === {tool_name:?});
+const search = await tools.tool_search({{ query: {tool_name:?} }});
 let error = null;
 try {{
   await tools[{tool_name:?}]({{}});
@@ -3772,6 +3868,7 @@ try {{
 text(JSON.stringify({{
   visibleListed: visibleTool !== undefined,
   listed: tool !== undefined,
+  searchListed: search.tools.some(({{ name }}) => name === {tool_name:?}),
   callable: typeof tools[{tool_name:?}] === "function",
   error,
 }}));
@@ -3802,6 +3899,10 @@ text(JSON.stringify({{
         .with_config(|config| {
             config
                 .features
+                .enable(Feature::CodeModeToolSearch)
+                .expect("ranked Code Mode search should be enabled");
+            config
+                .features
                 .enable(Feature::CodeMode)
                 .expect("test config should allow feature update");
             config
@@ -3823,6 +3924,7 @@ text(JSON.stringify({{
     let parsed: Value = serde_json::from_str(&output)?;
     assert_eq!(parsed["visibleListed"], true);
     assert_eq!(parsed["listed"], false);
+    assert_eq!(parsed["searchListed"], false);
     assert_eq!(parsed["callable"], false);
     assert!(
         parsed["error"]
@@ -7788,7 +7890,7 @@ text(JSON.stringify(tool));
         serde_json::json!({
             "name": "view_image",
             "description": format!(
-                "Inspect a local image\n\nexec tool declaration:\n```ts\ndeclare const tools: {{ view_image(args: {{\n  path: string;\n}}): Promise<{{\n  // high is resized; original preserves resolution\n  detail: \"high\" | \"original\";\n  // Image data URL\n  image_url: string;\n}}>; }};\n```\n\nInput schema: {}\n\nOutput schema: {}",
+                "Inspect a local image\n\nexec tool declaration:\n```ts\ndeclare const tools: {{ view_image(args: {{ path: string; }}): Promise<{{\n  // high is resized; original preserves resolution\n  detail: \"high\" | \"original\";\n  // Image data URL\n  image_url: string;\n}}>; }};\n```\n\nInput schema: {}\n\nOutput schema: {}",
                 serde_json::json!({
                     "type": "object",
                     "properties": {"path": {"type": "string"}},
@@ -7798,8 +7900,8 @@ text(JSON.stringify(tool));
                 serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "detail": {"type": "string", "enum": ["high", "original"], "description": "high is resized; original preserves resolution"},
-                        "image_url": {"type": "string", "description": "Image data URL"}
+                        "image_url": {"type": "string", "description": "Image data URL"},
+                        "detail": {"type": "string", "enum": ["high", "original"], "description": "high is resized; original preserves resolution"}
                     },
                     "required": ["image_url", "detail"],
                     "additionalProperties": false
@@ -7977,7 +8079,7 @@ text(JSON.stringify({
                     text_elements: Vec::new(),
                 }])
                 .with_thread_settings(ThreadSettingsOverrides {
-                    environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(
+                    environments: Some(codex_protocol::protocol::TurnEnvironmentRequests::new(
                         cwd,
                         Vec::new(),
                     )),
@@ -8076,7 +8178,7 @@ text(JSON.stringify({
                         "exec tool declaration:\n",
                         "```ts\n",
                         "declare const tools: { foo_bar(args: {}): Promise<unknown>; };\n",
-                        "```\n\nInput schema: {\"additionalProperties\":false,\"properties\":{},\"type\":\"object\"}",
+                        "```\n\nInput schema: {\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}",
                     ),
                 ),
                 ("foo_bar", "Shadowed normalized dynamic tool."),
@@ -8210,36 +8312,57 @@ async fn code_mode_compacts_local_refs_in_outbound_exec_description() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
+async fn code_mode_search_normalizes_and_calls_deferred_dynamic_tools() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
-        let _ = config.features.enable(Feature::CodeMode);
-    });
-    let base_test = builder.build(&server).await?;
+    let mut builder = test_codex()
+        .with_model_info_override("gpt-5.5", |model_info| {
+            model_info.supports_search_tool = true;
+            model_info.tool_mode = Some(ToolMode::CodeMode);
+        })
+        .with_config(|config| {
+            let _ = config.features.enable(Feature::CodeMode);
+            let _ = config.features.enable(Feature::CodeModeToolSearch);
+            config.code_mode.excluded_tool_namespaces = vec!["blocked".to_string()];
+        });
+    let base_test = builder.build_with_auto_env(&server).await?;
     let new_thread = base_test
         .thread_manager
         .start_thread(StartThreadOptions {
-            dynamic_tools: vec![DynamicToolSpec::Namespace(DynamicToolNamespaceSpec {
-                name: "codex_app".to_string(),
-                description: "Codex app tools.".to_string(),
-                tools: vec![DynamicToolNamespaceTool::Function(
-                    DynamicToolFunctionSpec {
-                        name: "hidden_dynamic_tool".to_string(),
-                        description: "A hidden dynamic tool.".to_string(),
-                        input_schema: serde_json::json!({
-                                "type": "object",
-                                "properties": {
-                                    "city": { "type": "string" }
-                                },
-                            "required": ["city"],
-                            "additionalProperties": false,
-                        }),
-                        defer_loading: true,
-                    },
-                )],
-            })],
+            dynamic_tools: vec![
+                DynamicToolSpec::Namespace(DynamicToolNamespaceSpec {
+                    name: "blocked".to_string(),
+                    description: "Blocked hidden dynamic tools.".to_string(),
+                    tools: vec![DynamicToolNamespaceTool::Function(
+                        DynamicToolFunctionSpec {
+                            name: "hidden-dynamic-tool".to_string(),
+                            description: "A blocked hidden dynamic tool.".to_string(),
+                            input_schema: serde_json::json!({ "type": "object" }),
+                            defer_loading: true,
+                        },
+                    )],
+                }),
+                DynamicToolSpec::Namespace(DynamicToolNamespaceSpec {
+                    name: "codex_app".to_string(),
+                    description: "Codex app tools.".to_string(),
+                    tools: vec![DynamicToolNamespaceTool::Function(
+                        DynamicToolFunctionSpec {
+                            name: "hidden-dynamic-tool".to_string(),
+                            description: "A hidden dynamic tool.".to_string(),
+                            input_schema: serde_json::json!({
+                                    "type": "object",
+                                    "properties": {
+                                        "city": { "type": "string" }
+                                    },
+                                "required": ["city"],
+                                "additionalProperties": false,
+                            }),
+                            defer_loading: true,
+                        },
+                    )],
+                }),
+            ],
             ..StartThreadOptions::new(base_test.config.clone())
         })
         .await?;
@@ -8248,13 +8371,21 @@ async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
     test.session_configured = new_thread.session_configured;
 
     let code = r#"
-const tool = ALL_TOOLS.find(({ name }) => name === "codex_app__hidden_dynamic_tool");
-const out = await tools.codex_app__hidden_dynamic_tool({ city: "Paris" });
+const errors = [];
+for (const args of [
+  { query: " " }, { query: "hidden", limit: 0 },
+]) {
+  try { await tools.tool_search(args); } catch (error) { errors.push(String(error)); }
+}
+const { tools: matches } = await tools.tool_search({ query: "blocked hidden-dynamic-tool", limit: 1 });
+const tool = matches[0];
+const out = await tools[tool.name]({ city: "Paris" });
 text(
   JSON.stringify({
     name: tool?.name ?? null,
     description: tool?.description ?? null,
     out,
+    recoveredFromInvalidArguments: errors.length === 2,
   })
 );
 "#;
@@ -8289,7 +8420,7 @@ text(
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(
+                environments: Some(codex_protocol::protocol::TurnEnvironmentRequests::new(
                     cwd,
                     Vec::new(),
                 )),
@@ -8320,7 +8451,7 @@ text(
     })
     .await;
     assert_eq!(request.namespace.as_deref(), Some("codex_app"));
-    assert_eq!(request.tool, "hidden_dynamic_tool");
+    assert_eq!(request.tool, "hidden-dynamic-tool");
     assert_eq!(request.arguments, serde_json::json!({ "city": "Paris" }));
     test.codex
         .submit(Op::DynamicToolResponse {
@@ -8359,6 +8490,7 @@ text(
         parsed.get("out"),
         Some(&Value::String("hidden-ok".to_string()))
     );
+    assert_eq!(parsed["recoveredFromInvalidArguments"], true);
     assert!(
         parsed
             .get("description")
@@ -8982,10 +9114,41 @@ async fn code_mode_oversized_websocket_yield_keeps_later_wait_incomplete() -> Re
     const LIMIT: usize = 15 * 1024 * 1024;
     const PROMPT: &str = "Record a call, yield, then stop";
 
-    // Calibrate a first request with the same tools/features/turn prompt; its
-    // exact serialized overhead varies with the model catalog and headers.
-    let configure = |config: &mut Config, instructions: String| {
-        config.base_instructions = Some(instructions);
+    // Keep padding outside input so it remains on incremental requests too.
+    // Base instructions are cached after the first request.
+    #[derive(Debug)]
+    struct RequestPadding {
+        text: String,
+        generations: AtomicUsize,
+    }
+    impl codex_extension_api::ModelRequestContributor for RequestPadding {
+        fn request(
+            &self,
+            input: codex_extension_api::ModelRequestInput<'_>,
+        ) -> Option<Box<dyn codex_extension_api::ModelResponseInterceptor>> {
+            if input.kind == codex_extension_api::ModelRequestKind::Generation
+                && self.generations.fetch_add(1, Ordering::Relaxed) > 0
+            {
+                input
+                    .client_metadata
+                    .get_or_insert_default()
+                    .insert("test-padding".to_string(), self.text.clone());
+            }
+            None
+        }
+    }
+    let extensions = |padding| {
+        let mut registry = ExtensionRegistryBuilder::new();
+        registry.model_request_contributor(Arc::new(RequestPadding {
+            text: padding,
+            generations: AtomicUsize::new(0),
+        }));
+        Arc::new(registry.build())
+    };
+
+    // Calibrate the yielded delta: initial developer context is larger and cached.
+    let configure = |config: &mut Config| {
+        config.base_instructions = Some(String::new());
         config.model_context_window = Some(20_000_000);
         config.model_auto_compact_token_limit = Some(20_000_000);
         config.features.disable(Feature::TokenBudget).unwrap();
@@ -9002,28 +9165,6 @@ async fn code_mode_oversized_websocket_yield_keeps_later_wait_incomplete() -> Re
         config.model_provider.stream_max_retries = Some(0);
     };
     let warmup = || vec![ev_response_created("warmup"), ev_completed("warmup")];
-    let probe_server = responses::start_websocket_server(vec![vec![
-        warmup(),
-        vec![ev_response_created("probe"), ev_completed("probe")],
-    ]])
-    .await;
-    let mut probe_builder = test_codex()
-        .with_model("test-gpt-5.1-codex")
-        .with_config(move |config| configure(config, String::new()));
-    let probe = probe_builder
-        .build_with_websocket_server(&probe_server)
-        .await?;
-    probe.submit_turn(PROMPT).await?;
-    let probe_connection = probe_server.single_connection();
-    assert_eq!(probe_connection.len(), 2);
-    let base_bytes = serde_json::to_vec(&probe_connection[1].body_json())?.len();
-    assert!(base_bytes + 4 * 1024 < LIMIT);
-    probe.codex.shutdown_and_wait().await?;
-    probe_server.shutdown().await;
-
-    // One 7 KiB invocation stays under the recorder's per-output argument
-    // budget. It pushes the yielded delta over the message budget only.
-    let instructions = "x".repeat(LIMIT - base_bytes - 4 * 1024);
     let code = r#"
 await tools.test_sync_tool({ barrier: { id: "x".repeat(7000), participants: 1 } });
 text("yielded");
@@ -9032,6 +9173,34 @@ await new Promise(() => {});
 "#;
     let mut exec = ev_custom_tool_call("exec-a", "exec", code);
     exec["item"]["id"] = serde_json::json!("ctc_exec_a");
+    let probe_server = responses::start_websocket_server(vec![vec![
+        warmup(),
+        vec![
+            ev_response_created("resp-1"),
+            exec.clone(),
+            ev_completed("resp-1"),
+        ],
+        vec![ev_response_created("probe"), ev_completed("probe")],
+    ]])
+    .await;
+    let mut probe_builder = test_codex()
+        .with_model("test-gpt-5.1-codex")
+        .with_extensions(extensions(String::new()))
+        .with_config(configure);
+    let probe = probe_builder
+        .build_with_websocket_server(&probe_server)
+        .await?;
+    probe.submit_turn(PROMPT).await?;
+    let probe_connection = probe_server.single_connection();
+    assert_eq!(probe_connection.len(), 3);
+    let base_bytes = serde_json::to_vec(&probe_connection[2].body_json())?.len();
+    assert!(base_bytes < LIMIT);
+    probe.codex.shutdown_and_wait().await?;
+    probe_server.shutdown().await;
+
+    // One 7 KiB invocation stays under the recorder's per-output argument
+    // budget. It pushes the yielded delta over the message budget only.
+    let padding = "x".repeat(LIMIT - base_bytes + 1024);
     let mut wait =
         responses::ev_function_call("wait-a", "wait", r#"{"cell_id":"1","terminate":true}"#);
     wait["item"]["id"] = serde_json::json!("fc_wait_a");
@@ -9044,7 +9213,8 @@ await new Promise(() => {});
     .await;
     let mut builder = test_codex()
         .with_model("test-gpt-5.1-codex")
-        .with_config(move |config| configure(config, instructions));
+        .with_extensions(extensions(padding))
+        .with_config(configure);
     let test = builder.build_with_websocket_server(&server).await?;
     test.submit_turn(PROMPT).await?;
     let connection = server.single_connection();

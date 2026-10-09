@@ -40,6 +40,10 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=";
 
+#[expect(
+    clippy::expect_used,
+    reason = "static test authentication must be valid"
+)]
 fn notes_fixture(server: &MockServer) -> TestCodexBuilder {
     let auth = CodexAuth::from_external_chatgpt_tokens(
         "header.e30.signature",
@@ -106,6 +110,10 @@ fn reply(id: &str) -> String {
     ])
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test turns must emit events and settle within the timeout"
+)]
 async fn completed(test: &TestCodex) -> (TurnCompleteEvent, Vec<EventMsg>) {
     tokio::time::timeout(Duration::from_secs(30), async {
         let mut events = Vec::new();
@@ -127,6 +135,10 @@ fn reset_count(events: &[EventMsg]) -> usize {
     )).count()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "assert native requests carry valid context window metadata"
+)]
 fn window(request: &ResponsesRequest) -> String {
     // This UUID is the notes/history identity, not merely a transport request id.
     let metadata: Value = serde_json::from_str(

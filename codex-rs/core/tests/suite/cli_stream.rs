@@ -36,6 +36,21 @@ fn repo_root() -> std::path::PathBuf {
     codex_utils_cargo_bin::repo_root().expect("failed to resolve repo root")
 }
 
+fn mock_cli_command(bin: std::path::PathBuf) -> Command {
+    let mut command = Command::new(bin);
+    // These streaming fixtures use local Responses servers, not remote Notes or Notebook.
+    command.args([
+        "exec",
+        "-c",
+        "context_strategy=\"compaction\"",
+        "-c",
+        "features.code_mode={enabled=false,runtime=\"v8\"}",
+        "-c",
+        "features.code_mode_only=false",
+    ]);
+    command
+}
+
 fn cli_sse_response() -> String {
     responses::sse(vec![
         responses::ev_response_created("resp-fixture"),
@@ -70,9 +85,8 @@ async fn mount_personal_access_token_startup(server: &MockServer) {
 #[expect(clippy::unwrap_used)]
 fn personal_access_token_exec_command(server: &MockServer, home: &TempDir) -> Command {
     let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd = mock_cli_command(bin);
+    cmd.arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/api/codex\"", server.uri()))
         .arg("-c")
@@ -229,9 +243,8 @@ async fn responses_mode_stream_cli() {
         server.uri()
     );
     let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd = mock_cli_command(bin);
+    cmd.arg("--skip-git-repo-check")
         .arg("-c")
         .arg(&provider_override)
         .arg("-c")
@@ -272,9 +285,8 @@ async fn responses_mode_stream_cli_supports_openai_base_url_config_override() {
 
     let home = TempDir::new().unwrap();
     let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd = mock_cli_command(bin);
+    cmd.arg("--skip-git-repo-check")
         .arg("-c")
         .arg("context_strategy=\"compaction\"")
         .arg("-c")
@@ -334,9 +346,8 @@ async fn exec_cli_applies_model_instructions_file() {
     let home = TempDir::new().unwrap();
     let repo_root = repo_root();
     let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd = mock_cli_command(bin);
+    cmd.arg("--skip-git-repo-check")
         .arg("--model")
         .arg("gpt-5.5")
         .arg("-c")
@@ -358,14 +369,9 @@ async fn exec_cli_applies_model_instructions_file() {
     assert!(output.status.success());
 
     // Inspect the captured request and verify our custom base instructions were
-    // included in the `instructions` field.
+    // included in the base instructions developer message.
     let request = resp_mock.single_request();
-    let body = request.body_json();
-    let instructions = body
-        .get("instructions")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
+    let instructions = request.message_input_texts("developer").join("\n");
     assert!(
         instructions.contains(marker),
         "instructions did not contain custom marker; got: {instructions}"
@@ -406,9 +412,8 @@ async fn exec_cli_profile_applies_model_instructions_file() {
 
     let repo_root = repo_root();
     let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd = mock_cli_command(bin);
+    cmd.arg("--skip-git-repo-check")
         .arg("--model")
         .arg("gpt-5.5")
         .arg("--profile")
@@ -430,12 +435,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
     assert!(output.status.success());
 
     let request = resp_mock.single_request();
-    let body = request.body_json();
-    let instructions = body
-        .get("instructions")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
+    let instructions = request.message_input_texts("developer").join("\n");
     assert!(
         instructions.contains(marker),
         "instructions did not contain profile marker; got: {instructions}"
@@ -453,9 +453,8 @@ async fn responses_api_stream_cli() {
 
     let home = TempDir::new().unwrap();
     let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd = mock_cli_command(bin);
+    cmd.arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
         .arg("-C")
@@ -494,9 +493,8 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
 
     // 4. Run the codex CLI and invoke `exec`, which is what records a session.
     let bin = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd = Command::new(bin);
-    cmd.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd = mock_cli_command(bin);
+    cmd.arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
         .arg("-C")
@@ -610,9 +608,8 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
     let marker2 = format!("integration-resume-{}", Uuid::new_v4());
     let prompt2 = format!("echo {marker2}");
     let bin2 = codex_utils_cargo_bin::cargo_bin("codex").unwrap();
-    let mut cmd2 = Command::new(bin2);
-    cmd2.arg("exec")
-        .arg("--skip-git-repo-check")
+    let mut cmd2 = mock_cli_command(bin2);
+    cmd2.arg("--skip-git-repo-check")
         .arg("-c")
         .arg(format!("openai_base_url=\"{}/v1\"", server.uri()))
         .arg("-C")

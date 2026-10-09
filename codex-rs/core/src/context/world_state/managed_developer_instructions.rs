@@ -2,6 +2,7 @@ use super::PreviousSectionState;
 use super::SectionTransition;
 use super::WorldStateHash;
 use super::WorldStateSection;
+use super::WorldStateUpdate;
 use crate::context::ContextualUserFragment;
 use codex_config::Sourced;
 use codex_protocol::models::ContentItemKind;
@@ -28,10 +29,6 @@ impl ContextualUserFragment for ManagedDeveloperInstructions {
 
     fn role(&self) -> &'static str {
         "developer"
-    }
-
-    fn requires_separate_message(&self) -> bool {
-        true
     }
 
     fn markers(&self) -> (&'static str, &'static str) {
@@ -127,7 +124,7 @@ impl WorldStateSection for ManagedDeveloperInstructionsState {
                 .map(WorldStateHash::from_fragment),
         };
         if matches!(previous, PreviousSectionState::Known(previous) if previous == &current) {
-            return (None, None);
+            return (None, Vec::new());
         }
         let previous_had_instructions = match previous {
             PreviousSectionState::Absent => false,
@@ -142,9 +139,12 @@ impl WorldStateSection for ManagedDeveloperInstructionsState {
             (None, true) => ManagedDeveloperInstructions {
                 instructions: REMOVAL_NOTICE.to_string(),
             },
-            (None, false) => return (Some(current), None),
+            (None, false) => return (Some(current), Vec::new()),
         };
-        (Some(current), Some(Box::new(fragment)))
+        (
+            Some(current),
+            vec![WorldStateUpdate::fragment(fragment).standalone()],
+        )
     }
 }
 

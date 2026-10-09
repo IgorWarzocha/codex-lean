@@ -696,7 +696,7 @@ async fn opted_in_executor_provider_skips_host_discovery_but_injects_discovered_
             // Keep the trace fixture's legacy mode: paginated SQLite workers can close
             // spans through a different subscriber than this test's scoped collector.
             history_mode: Some(codex_protocol::protocol::ThreadHistoryMode::Legacy),
-            environments: Some(vec![environment.clone()]),
+            environments: Some(vec![environment.clone().into_request()]),
             thread_extension_init,
             ..StartThreadOptions::new(executor_config)
         })
@@ -1113,7 +1113,7 @@ async fn executor_skill_tool_reads_references_under_current_permissions(
     let thread = test
         .thread_manager
         .start_thread(StartThreadOptions {
-            environments: Some(vec![selection]),
+            environments: Some(vec![selection.into_request()]),
             thread_extension_init,
             ..StartThreadOptions::new(config)
         })
@@ -1811,4 +1811,122 @@ fn skill_output(request: &responses::ResponsesRequest, call_id: &str) -> String 
         .expect("skills result")
         .0
         .expect("skills text")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn production_turn_discovers_skills_after_compaction_and_resume() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    const COMPACT_PROMPT: &str = "Summarize discovered skills before resetting history.";
+    const SUMMARY: &str = "Discovered cloud-search; rediscover skills when needed.";
+    let server = responses::start_mock_server().await;
+    let catalog = SkillCatalog {
+        entries: vec![SkillCatalogEntry::new(
+            SkillPackageId("cloud/cloud-search".to_string()),
+            SkillAuthority::new(SkillSourceKind::Cloud, CODEX_APPS_MCP_SERVER_NAME),
+            "cloud-search",
+            "Search available company knowledge.",
+            SkillResourceId::new("skill://codex_apps/cloud-search/SKILL.md"),
+        )],
+        warnings: Vec::new(),
+    };
+    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+    install_with_providers(
+        &mut extensions,
+        SkillProviders::new().with_cloud_provider(Arc::new(CatalogSkillProvider { catalog })),
+        |config: &Config| SkillsExtensionConfig {
+            include_instructions: config.include_skill_instructions,
+            max_context_tokens: config.skill_max_context_tokens,
+            bundled_skills_enabled: false,
+            cloud_skill_enabled: true,
+            shadow_selection_enabled: false,
+        },
+    );
+    let extensions = Arc::new(extensions.build());
+    let builder = || {
+        test_codex()
+            .with_direct_tools()
+            .with_exec_server_url("none")
+            .with_extensions(extensions.clone())
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                configure_catalog_test(config);
+                config.cloud_skill_enabled = true;
+                // Exercise local compaction without the backend's remote compact endpoint.
+                config.model_provider.name = "Skills discovery compaction test".to_string();
+                config.compact_prompt = Some(COMPACT_PROMPT.to_string());
+            })
+    };
+    let list_response = |id: &str| {
+        sse(vec![
+            ev_response_created(id),
+            responses::ev_custom_tool_call(id, "skills", "list"),
+            ev_completed(id),
+        ])
+    };
+    let responses = responses::mount_sse_sequence(
+        &server,
+        vec![
+            list_response("before-compact"),
+            responses::sse_completed("before-done"),
+            sse(vec![
+                ev_response_created("compact"),
+                responses::ev_assistant_message("summary", SUMMARY),
+                ev_completed("compact"),
+            ]),
+            list_response("after-compact"),
+            responses::sse_completed("after-done"),
+            list_response("after-resume"),
+            responses::sse_completed("resumed-done"),
+        ],
+    )
+    .await;
+    let test = builder().build_with_auto_env(&server).await?;
+    // No local attachment: cloud discovery must also work without an executor.
+    test.submit_text_turn("Inspect the available skills.")
+        .await?;
+    test.codex.submit(Op::Compact).await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::ContextCompacted(_))
+    })
+    .await;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    test.submit_text_turn("Inspect skills after compaction.")
+        .await?;
+    let resumed = builder().restart_with_auto_env(&server, &test).await?;
+    assert_eq!(
+        resumed.session_configured.thread_id,
+        test.session_configured.thread_id
+    );
+    resumed
+        .submit_text_turn("Inspect skills after resuming.")
+        .await?;
+
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 7);
+    assert!(requests[2].body_contains_text(COMPACT_PROMPT));
+    assert!(requests[5].body_contains_text(SUMMARY));
+    for (index, call_id) in [
+        (1, "before-compact"),
+        (4, "after-compact"),
+        (6, "after-resume"),
+    ] {
+        assert_eq!(
+            skill_output(&requests[index], call_id),
+            "- cloud-search: Search available company knowledge.",
+        );
+    }
+    // Discovery results belong to tool outputs, never an eagerly rendered standing catalog.
+    for request in &requests {
+        assert!(
+            request
+                .message_input_texts("developer")
+                .iter()
+                .all(|text| !text.contains("- cloud-search:"))
+        );
+    }
+    resumed.codex.shutdown_and_wait().await?;
+    Ok(())
 }

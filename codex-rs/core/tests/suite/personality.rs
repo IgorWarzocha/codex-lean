@@ -15,7 +15,7 @@ use core_test_support::responses::sse_completed;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
@@ -23,6 +23,7 @@ use pretty_assertions::assert_eq;
 use test_case::test_case;
 
 const BUNDLED_FRIENDLY_TEMPLATE: &str = "You have a vivid inner life as Codex:";
+
 const CUSTOM_INSTRUCTIONS: &str = "Custom instructions\n# Personality\nThis must remain\n## Writing Style\nThis must also remain\n# General\nGeneral instructions";
 
 fn read_only_text_turn(
@@ -38,7 +39,7 @@ fn read_only_text_turn(
         text_elements: Vec::new(),
     }])
     .with_thread_settings(ThreadSettingsOverrides {
-        environments: Some(local_selections(test.config.cwd.clone())),
+        environments: Some(local_requests(test.config.cwd.clone())),
         approval_policy: Some(approval_policy),
         sandbox_policy: Some(sandbox_policy),
         permission_profile,
@@ -102,11 +103,13 @@ async fn config_personality_none_sends_no_personality() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[test_case(None; "without feature config")]
-#[test_case(Some(false); "with removed feature disabled")]
-#[test_case(Some(true); "with removed feature enabled")]
+#[test_case(None, None; "default personality")]
+#[test_case(Some("none"), None; "none without feature config")]
+#[test_case(Some("none"), Some(false); "with removed feature disabled")]
+#[test_case(Some("none"), Some(true); "with removed feature enabled")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn config_personality_none_strips_baked_personality_section(
+    personality: Option<&'static str>,
     legacy_feature_setting: Option<bool>,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
@@ -117,11 +120,13 @@ async fn config_personality_none_strips_baked_personality_section(
         .with_model_info_override("gpt-5.5", |model_info| {
             if let Some(model_messages) = model_info.model_messages.as_mut() {
                 model_messages.instructions_template = Some("Base instructions\n# Personality\nBaked personality\n## Writing Style\nNested writing style\n# General\nGeneral instructions".to_string());
-                model_messages.instructions_variables = None;
             }
         })
         .with_pre_build_hook(move |home| {
-            let mut config = "personality = \"none\"\n".to_string();
+            let mut config = String::new();
+            if let Some(value) = personality {
+                config.push_str(&format!("personality = \"{value}\"\n"));
+            }
             if let Some(value) = legacy_feature_setting {
                 config.push_str(&format!("[features]\npersonality = {value}\n"));
             }
@@ -140,10 +145,12 @@ async fn config_personality_none_strips_baked_personality_section(
 
     wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    assert_eq!(
-        resp_mock.single_request().instructions_text(),
+    let expected = if personality == Some("none") {
         "Base instructions\n# General\nGeneral instructions"
-    );
+    } else {
+        "Base instructions\n# Personality\nBaked personality\n## Writing Style\nNested writing style\n# General\nGeneral instructions"
+    };
+    assert_eq!(resp_mock.single_request().instructions_text(), expected);
 
     Ok(())
 }
@@ -186,10 +193,10 @@ async fn config_personality_none_preserves_explicit_base_instructions(
 
     let request = resp_mock.single_request();
     let body = request.body_json();
-    // Responses requests omit the instructions field for an explicit empty override.
-    let expected_instructions = (!custom_instructions.is_empty())
-        .then(|| serde_json::Value::String(custom_instructions.to_string()));
-    assert_eq!(body.get("instructions"), expected_instructions.as_ref());
+    assert!(body.get("instructions").is_none());
+    if !custom_instructions.is_empty() {
+        assert_eq!(request.instructions_text(), custom_instructions);
+    }
     assert!(!request.body_contains_text(BUNDLED_FRIENDLY_TEMPLATE));
 
     Ok(())

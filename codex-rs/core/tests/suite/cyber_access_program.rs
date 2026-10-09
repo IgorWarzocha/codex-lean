@@ -12,6 +12,7 @@ use codex_protocol::turn_input::CyberAccessProgram;
 use codex_protocol::user_input::UserInput;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutRecorder;
+use core_test_support::ThreadIdle;
 use core_test_support::responses;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
@@ -39,7 +40,7 @@ async fn recover_turn_restores_cyber_access_program_without_making_it_sticky() -
         .await;
     let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
     let initial = builder.build_with_streaming_server(&initial_server).await?;
-    let TurnInputSubmission::Started { turn_id } = initial
+    let TurnInputSubmission::Started { turn_id, .. } = initial
         .codex
         .start_or_steer_turn(
             TurnInputRequest::user_input(vec![UserInput::Text {
@@ -105,7 +106,8 @@ async fn recover_turn_restores_cyber_access_program_without_making_it_sticky() -
     assert_eq!(
         submission,
         StartIfIdleSubmission::Started {
-            turn_id: turn_id.clone(),
+            root_turn_id: turn_id.clone(),
+            turn_id: turn_id.clone()
         }
     );
     wait_for_event(&test.codex, |event| {
@@ -133,6 +135,7 @@ async fn recover_turn_restores_cyber_access_program_without_making_it_sticky() -
     .await;
     let TurnInputSubmission::Started {
         turn_id: next_turn_id,
+        ..
     } = test
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
@@ -252,7 +255,7 @@ async fn cyber_access_program_survives_mid_turn_remote_compaction_v2(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
-    // Final answers defer late child completion mail to the next parent turn.
+    // V2 terminal child results may autonomously resume the parent.
     let final_response = |id: &str| {
         responses::sse(vec![
             responses::ev_response_created(id),
@@ -299,7 +302,10 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
             final_response("resp-child-initial"),
         )
         .await;
+        let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+        extensions.thread_lifecycle_contributor(std::sync::Arc::new(ThreadIdle));
         let test = test_codex()
+            .with_extensions(std::sync::Arc::new(extensions.build()))
             .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
             .with_model(if is_v2 { "gpt-5.6-sol" } else { "gpt-5.1" })
             .with_config(move |config| {
@@ -318,9 +324,11 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
             .await?;
         let mut created_threads = test.thread_manager.subscribe_thread_created();
         submit(&test, Some(CyberAccessProgram::DaybreakRed)).await?;
+        ThreadIdle::wait(&test.codex).await;
         let child_id = created_threads.recv().await?;
         let child = test.thread_manager.get_thread(child_id).await?;
         wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        ThreadIdle::wait(&child).await;
 
         let child_programs = |requests: &responses::ResponseMock| {
             requests
@@ -386,7 +394,41 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                 ),
                 responses::ev_completed("resp-followup"),
             ]));
-            responses::mount_sse_sequence(&server, reply_sequence).await;
+            // A completion autoresume still carries the previous turn's access program.
+            // It must not consume the next explicitly configured parent's tool call.
+            let replies = std::sync::Mutex::new(std::collections::VecDeque::from(reply_sequence));
+            let expected_parent_program = expected.clone();
+            let expected_calls = if reload && !is_v2 { 2 } else { 1 };
+            Mock::given(method("POST"))
+                .and(path("/v1/responses"))
+                .and(move |request: &wiremock::Request| {
+                    if request.headers.contains_key("x-openai-subagent") {
+                        return false;
+                    }
+                    let body = match request
+                        .headers
+                        .get("content-encoding")
+                        .and_then(|value| value.to_str().ok())
+                    {
+                        Some("zstd") => {
+                            zstd::stream::decode_all(std::io::Cursor::new(&request.body))
+                                .expect("decode parent request")
+                        }
+                        _ => request.body.clone(),
+                    };
+                    let body: serde_json::Value =
+                        serde_json::from_slice(&body).expect("parent request JSON");
+                    body["access_programs"] == expected_parent_program
+                })
+                .respond_with(move |_: &wiremock::Request| {
+                    responses::sse_response(
+                        replies.lock().unwrap().pop_front().expect("parent reply"),
+                    )
+                })
+                .up_to_n_times(expected_calls)
+                .expect(expected_calls)
+                .mount(&server)
+                .await;
             let followup_child_request = responses::mount_sse_once_match(
                 &server,
                 header("x-openai-subagent", "collab_spawn"),
@@ -394,8 +436,10 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
             )
             .await;
             submit(&test, program).await?;
+            ThreadIdle::wait(&test.codex).await;
             let child = test.thread_manager.get_thread(child_id).await?;
             wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+            ThreadIdle::wait(&child).await;
             assert_eq!(
                 child_programs(&followup_child_request),
                 vec![expected],
@@ -482,20 +526,39 @@ async fn cyber_access_program_changes_on_one_websocket_with_response_reuse(
 }
 
 async fn submit(test: &TestCodex, program: Option<CyberAccessProgram>) -> Result<()> {
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "hello".to_owned(),
-                text_elements: Vec::new(),
-            }])
-            .on_start(TurnStartOptions {
-                cyber_access_program: program,
-                ..Default::default()
-            }),
-        )
-        .await?;
+    // Access programs are start options, not steering options. A V2 completion
+    // autoresume must finish before this explicit new turn applies its program.
+    let turn_id = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let submission = test
+                .codex
+                .start_turn_if_idle(
+                    TurnInputRequest::user_input(vec![UserInput::Text {
+                        text: "hello".to_owned(),
+                        text_elements: Vec::new(),
+                    }])
+                    .on_start(TurnStartOptions {
+                        cyber_access_program: program,
+                        ..Default::default()
+                    }),
+                )
+                .await?;
+            match submission {
+                StartIfIdleSubmission::Started { turn_id, .. } => break anyhow::Ok(turn_id),
+                StartIfIdleSubmission::NotSubmitted {
+                    reason:
+                        codex_core::NotSubmittedReason::NotIdle
+                        | codex_core::NotSubmittedReason::PendingTriggerTurn,
+                } => {}
+                other => anyhow::bail!("explicit cyber turn rejected: {other:?}"),
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await??;
     let event = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_) | EventMsg::Error(_))
+        matches!(event, EventMsg::TurnComplete(completed) if completed.turn_id == turn_id)
+            || matches!(event, EventMsg::Error(_))
     })
     .await;
     if let EventMsg::Error(error) = event {

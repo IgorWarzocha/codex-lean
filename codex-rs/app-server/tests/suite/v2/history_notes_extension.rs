@@ -42,6 +42,7 @@ async fn context_strategy_notes_default_rejects_api_key_auth_without_loading_a_t
     let server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("context_strategy = 'notes'")
         .with_model_provider("openai-custom")
         .with_provider_name("OpenAI")
         .with_provider_base_url(&format!("{}/backend-api/codex", server.uri()))
@@ -189,8 +190,9 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
         // Exercise the actual Notes and Notebook defaults with their required
         // backend authentication and unsandboxed runtime, rather than opting out.
         .with_sandbox_mode("danger-full-access")
+        .with_root_config("context_strategy = 'notes'")
         .with_extra_config(&format!(
-            "[features.code_mode]\ndeno_program = {}",
+            "[features.code_mode]\nenabled = true\nruntime = 'notebook'\ndeno_program = {}",
             serde_json::to_string(&std::env::var("DENO_PROGRAM").unwrap_or_else(|_| "deno".into()))?
         ))
         .with_root_config(&format!("chatgpt_base_url = \"{}\"", backend.uri()))
@@ -245,9 +247,23 @@ async fn app_server_uses_configured_notes_backend_for_context_window_hints(
         .custom_tool_call_output_content_and_success("notes-catalog")
         .expect("Notebook catalog output");
     let catalog = catalog.expect("Notebook must execute and return its nested tool catalog");
+    let body = request.body_json();
+    let exec = body["tools"]
+        .as_array()
+        .expect("model tool declarations")
+        .iter()
+        .find(|tool| tool["name"] == "exec")
+        .expect("Notebook exec declaration");
+    assert!(
+        exec["description"]
+            .as_str()
+            .expect("exec description")
+            .contains("Run JavaScript/TypeScript. Source only")
+    );
     assert!(
         request
-            .instructions_text()
+            .message_input_texts("developer")
+            .join("\n")
             .contains("Persistent Deno/TypeScript notebook")
     );
     assert!(catalog.contains("collaboration__agent_board"));

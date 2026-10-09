@@ -184,6 +184,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
             crate::dynamic_tools_mcp::DynamicToolMcpServer::start(
                 session.request_handle(),
                 codex_app_server_protocol::ThreadStartParams::default(),
+                app.config.features.get().clone(),
                 app.app_event_tx.clone(),
                 app.dynamic_tool_status_updates.clone(),
                 /*managed_requirement*/ None,
@@ -354,8 +355,9 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
         );
         assert!(app.agent_navigation.begin_picker_refresh(id).is_some());
         assert!(
-            !app.agent_navigation
+            app.agent_navigation
                 .finish_picker_refresh(id, stale_picker_refresh)
+                .is_none()
         );
         // Let the rebound timer become due without depending on machine uptime.
         tokio::time::pause();

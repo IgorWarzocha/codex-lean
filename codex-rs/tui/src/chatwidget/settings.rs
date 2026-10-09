@@ -6,15 +6,31 @@ use crate::chatwidget::rate_limits::RATE_LIMIT_SWITCH_PROMPT_VIEW_ID;
 
 impl ChatWidget {
     pub(crate) fn set_daybreak_enabled(&mut self, enabled: bool) {
-        self.daybreak_enabled = enabled;
+        self.daybreak_enabled = enabled && self.config.features.enabled(Feature::CliDaybreak);
         self.bottom_pane
             .set_daybreak_command_description(self.daybreak_command_description());
+    }
+
+    /// UI eligibility only; the catalog and server still determine model/program access.
+    pub(crate) fn daybreak_account_eligible(&self) -> bool {
+        self.config.features.enabled(Feature::CliDaybreak)
+            && self.config.model_provider_id == "openai"
+            && (self.has_chatgpt_account
+                || matches!(
+                    self.status_account_display,
+                    Some(StatusAccountDisplay::ApiKey)
+                ))
+    }
+
+    /// API-key turns need no explicit program while Daybreak is off.
+    pub(crate) fn daybreak_turn_eligible(&self, enabled: bool) -> bool {
+        self.daybreak_account_eligible() && (self.has_chatgpt_account || enabled)
     }
 
     pub(super) fn daybreak_command_description(&self) -> Option<&'static str> {
         if self.daybreak_enabled {
             Some("Disable broader access for cybersecurity work")
-        } else if !self.has_chatgpt_account || self.config.model_provider_id != "openai" {
+        } else if !self.daybreak_account_eligible() {
             None
         } else {
             match crate::daybreak::availability(&self.model_catalog.models) {
@@ -96,7 +112,11 @@ impl ChatWidget {
             );
         }
         let enabled = self.config.features.enabled(feature);
-        if feature == Feature::FastMode {
+        if feature == Feature::CliDaybreak {
+            self.set_daybreak_enabled(self.daybreak_enabled);
+            self.refresh_status_surfaces();
+        }
+        if matches!(feature, Feature::FastMode | Feature::UltrafastMode) {
             self.refresh_effective_service_tier();
             self.sync_service_tier_commands();
         }

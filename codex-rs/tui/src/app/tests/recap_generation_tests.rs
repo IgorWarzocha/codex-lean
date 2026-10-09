@@ -219,7 +219,11 @@ stream_max_retries = 0
         request["text"]["format"]["schema"]["required"],
         serde_json::json!(["summary", "next_action"])
     );
-    assert_eq!(request["tools"], serde_json::json!([]));
+    // Lean retains on-demand skill discovery even for bounded structured requests.
+    let tools = request["tools"].as_array().expect("recap tools");
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], "custom");
+    assert_eq!(tools[0]["name"], "skills");
 
     app_server.shutdown().await?;
     model_server.shutdown().await;

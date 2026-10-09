@@ -63,7 +63,7 @@ impl SessionTask for RegularTask {
     ) -> SessionTaskResult {
         let run_turn_span = trace_span!("run_turn");
         *self.idle_input.lock().await = input;
-        sess.emit_turn_started(&ctx).await;
+        sess.emit_turn_started(&ctx, TaskKind::Regular).await;
         // Hold the original input, including attachments and acceptance metadata, before
         // preparation. Idle rollover must not replay or synthesize a replacement prompt.
         let rollover = sess

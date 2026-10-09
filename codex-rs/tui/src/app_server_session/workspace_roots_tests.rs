@@ -45,6 +45,7 @@ stream_max_retries = 0
         ),
     )?;
     let server_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(server_home.path().to_path_buf())
         .harness_overrides(ConfigOverrides {
             cwd: Some(remote_cwd.to_path_buf()),
@@ -53,6 +54,7 @@ stream_max_retries = 0
         .build()
         .await?;
     let client_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(client_home.path().to_path_buf())
         .harness_overrides(ConfigOverrides {
             cwd: Some(client_home.path().to_path_buf()),
@@ -172,6 +174,7 @@ stream_max_retries = 0
 async fn embedded_lifecycle_requests_preserve_explicit_workspace_roots() -> Result<()> {
     let home = tempfile::tempdir()?;
     let config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .harness_overrides(ConfigOverrides {
             additional_writable_roots: vec![home.path().to_path_buf()],

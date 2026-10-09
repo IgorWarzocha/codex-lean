@@ -6,7 +6,6 @@ use std::sync::atomic::Ordering;
 use crate::client::ModelClientSession;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
-use crate::compact::InitialContextInjection;
 use crate::compact::run_inline_auto_compact_task;
 use crate::compact_remote_v2::run_inline_remote_auto_compact_task as run_inline_remote_auto_compact_task_v2;
 use crate::connectors;
@@ -117,6 +116,7 @@ use codex_skills::collect_explicit_skill_mentions;
 use codex_skills::tool_kind_for_path;
 use codex_skills_extension::HostSkillPrompts;
 use codex_skills_extension::InjectedHostSkillPrompts;
+use codex_skills_extension::validate_required_skills;
 use codex_thread_store::PersistContext;
 use codex_tools::DiscoverableTool;
 use codex_tools::ToolName;
@@ -281,8 +281,8 @@ pub(crate) async fn run_turn(
         }
         Err(err) => return Err(err),
     };
-    // Keep the exact model-visible state used by this turn and its inline compactions.
-    let (world_state, display_roots) = tokio::join!(
+    // Record initial context while preparing diff display roots.
+    let (record_context, display_roots) = tokio::join!(
         sess.record_context_updates_and_set_reference_context_item(first_step_context.as_ref()),
         async {
             // Guardian must not wait for remote Git discovery just to display diff paths.
@@ -308,7 +308,7 @@ pub(crate) async fn run_turn(
             }
         },
     );
-    let mut world_state = world_state?;
+    record_context?;
 
     let Some((injection_items, explicitly_enabled_connectors)) = build_skills_and_plugins(
         &sess,
@@ -347,15 +347,13 @@ pub(crate) async fn run_turn(
         run_auto_compact(
             &sess,
             Arc::clone(&first_step_context),
-            /*fallback_step_context*/ None,
+            Arc::clone(&first_step_context),
             &mut client_session,
-            InitialContextInjection::DoNotInject,
             CompactionReason::ContextLimit,
             CompactionPhase::PreTurn,
         )
         .await?;
-        world_state = sess
-            .record_context_updates_and_set_reference_context_item(first_step_context.as_ref())
+        sess.record_context_updates_and_set_reference_context_item(first_step_context.as_ref())
             .await?;
         crate::guardian::finalize_guardian_input(
             &sess,
@@ -507,9 +505,18 @@ pub(crate) async fn run_turn(
             )
             .await?;
 
-            world_state = sess
-                .record_step_world_state_if_changed(step_context.as_ref())
+            sess.record_step_world_state_if_changed(step_context.as_ref())
                 .await?;
+
+            // Isolated Guardian reviewers deliberately have no skill catalog.
+            if !crate::guardian::is_basic_session_source(&turn_context.session_source) {
+                validate_required_skills(
+                    &sess.services.thread_extension_data,
+                    &turn_context.extension_data,
+                    step_context.environments.required_skills(),
+                )
+                .map_err(CodexErr::Fatal)?;
+            }
 
             // Keep the override after accepted input so history truncation removes them together.
             sess.record_reasoning_effort_override(step_context.as_ref())
@@ -628,13 +635,20 @@ pub(crate) async fn run_turn(
                 // as long as compaction works well in getting us way below the token limit, we shouldn't worry about being in an infinite loop.
                 if should_roll_over {
                     let compact_result = if requested_new_context {
+                        // A fresh window may renegotiate incremental tools; do not reuse
+                        // the old window's captured tool surface.
+                        let replacement_world_state = Arc::new(
+                            sess.build_world_state_for_step(
+                                &step_context,
+                                /*new_window*/ true,
+                            )
+                            .or_cancel(&cancellation_token)
+                            .await??,
+                        );
                         crate::compact_token_budget::run_inline_auto_compact_task(
                             Arc::clone(&sess),
                             Arc::clone(&step_context),
-                            InitialContextInjection::BeforeLastUserMessage {
-                                world_state: Arc::clone(&world_state),
-                                step_context: Arc::clone(&step_context),
-                            },
+                            replacement_world_state,
                             cancellation_token.child_token(),
                         )
                         .await
@@ -642,12 +656,8 @@ pub(crate) async fn run_turn(
                         run_auto_compact(
                             &sess,
                             Arc::clone(&step_context),
-                            /*fallback_step_context*/ None,
+                            Arc::clone(&step_context),
                             &mut client_session,
-                            InitialContextInjection::BeforeLastUserMessage {
-                                world_state: Arc::clone(&world_state),
-                                step_context: Arc::clone(&step_context),
-                            },
                             CompactionReason::ContextLimit,
                             CompactionPhase::MidTurn,
                         )
@@ -755,9 +765,8 @@ pub(crate) async fn run_turn(
                         && let Err(err) = run_auto_compact(
                             &sess,
                             Arc::clone(&step_context),
-                            /*fallback_step_context*/ None,
+                            Arc::clone(&step_context),
                             &mut client_session,
-                            InitialContextInjection::DoNotInject,
                             CompactionReason::ContextLimit,
                             CompactionPhase::PostTurn,
                         )
@@ -801,13 +810,16 @@ pub(crate) async fn run_turn(
                         .thread_extension_data
                         .insert(crate::guardian::ExhaustedReviewBudget::Compacting);
                 }
+                let rescue_world_state = Arc::new(
+                    sess.build_world_state_for_step(&step_context, /*new_window*/ false)
+                        .or_cancel(&cancellation_token)
+                        .await??,
+                );
                 crate::compact::run_inline_emergency_compact_task(
                     Arc::clone(&sess),
                     Arc::clone(&turn_context),
-                    InitialContextInjection::BeforeLastUserMessage {
-                        world_state: Arc::clone(&world_state),
-                        step_context: Arc::clone(&step_context),
-                    },
+                    Arc::clone(&step_context),
+                    rescue_world_state,
                 )
                 .or_cancel(&cancellation_token)
                 .await??;
@@ -835,12 +847,8 @@ pub(crate) async fn run_turn(
                 run_auto_compact(
                     &sess,
                     Arc::clone(&step_context),
-                    /*fallback_step_context*/ None,
+                    Arc::clone(&step_context),
                     &mut client_session,
-                    InitialContextInjection::BeforeLastUserMessage {
-                        world_state: Arc::clone(&world_state),
-                        step_context: Arc::clone(&step_context),
-                    },
                     CompactionReason::ContextLimit,
                     CompactionPhase::MidTurn,
                 )
@@ -1216,7 +1224,7 @@ async fn build_skills_and_plugins(
             .zip(injected_host_skills.iter())
             .filter_map(|(item, skill)| {
                 (!injected_host_skill_prompts
-                    .contains_path(&skill.path_to_skills_md.to_string_lossy()))
+                    .contains_path(&skill.path_to_skills_md.inferred_native_path_string()))
                 .then_some(item)
             })
             .collect(),
@@ -1351,6 +1359,7 @@ async fn track_turn_resolved_config_analytics(
                 .get::<codex_extension_api::GuardianV2Enabled>()
                 .is_some(),
             sandbox_network_access: turn_context.network_sandbox_policy().is_enabled(),
+            multi_agent_version: turn_context.multi_agent_version,
             collaboration_mode: turn_context.mode(),
             personality: turn_context.personality(),
             workspace_kind: turn_context.turn_metadata_state.workspace_kind(),
@@ -1382,10 +1391,9 @@ async fn run_pre_sampling_compact(
             .await?;
         run_auto_compact(
             sess,
+            Arc::clone(&step_context),
             step_context,
-            /*fallback_step_context*/ None,
             client_session,
-            InitialContextInjection::DoNotInject,
             CompactionReason::ContextLimit,
             CompactionPhase::PreTurn,
         )
@@ -1400,33 +1408,6 @@ fn comp_hash_changed(previous: Option<&str>, current: Option<&str>) -> bool {
     previous
         .zip(current)
         .is_some_and(|(previous, current)| previous != current)
-}
-
-/// Captures the current model's request-scoped state for retrying previous-model compaction.
-///
-/// Returns `None` when auth uses neither the Codex backend nor an API key, the provider is
-/// not OpenAI, or the previous and current model/program pairs are the same.
-async fn capture_current_model_fallback_step_context(
-    sess: &Arc<Session>,
-    turn_context: &Arc<TurnContext>,
-    previous_turn_context: &TurnContext,
-    cancellation_token: &CancellationToken,
-) -> CodexResult<Option<Arc<StepContext>>> {
-    let supports_fallback = turn_context
-        .auth_manager
-        .as_deref()
-        .and_then(codex_login::AuthManager::auth_cached)
-        .is_some_and(|auth| auth.uses_codex_backend() || auth.is_api_key_auth());
-    if !supports_fallback
-        || !turn_context.provider.info().is_openai()
-        || (previous_turn_context.model_info().slug == turn_context.model_info().slug
-            && previous_turn_context.cyber_access_program == turn_context.cyber_access_program)
-    {
-        return Ok(None);
-    }
-    sess.capture_speculative_step_context(Arc::clone(turn_context), cancellation_token)
-        .await
-        .map(Some)
 }
 
 /// Runs pre-sampling compaction against the previous model when its compaction compatibility
@@ -1463,88 +1444,67 @@ async fn maybe_run_previous_model_inline_compact(
     );
     let previous_model_turn_context = Arc::new(previous_model_turn_context);
 
-    if should_compact_for_comp_hash_change {
-        let step_context = sess
-            .capture_step_context(Arc::clone(&previous_model_turn_context), cancellation_token)
-            .await?;
-        let fallback_step_context = capture_current_model_fallback_step_context(
-            sess,
-            turn_context,
-            &previous_model_turn_context,
-            cancellation_token,
-        )
-        .await?;
-        run_auto_compact(
-            sess,
-            step_context,
-            fallback_step_context,
-            client_session,
-            InitialContextInjection::DoNotInject,
-            CompactionReason::CompHashChanged,
-            CompactionPhase::PreTurn,
-        )
-        .await?;
-        return Ok(());
-    }
-
-    // Notes treats selected windows as working budgets. Only assembled-request
-    // admission on the captured model may rescue actual execution exhaustion.
-    if turn_context.config.context_strategy == ContextStrategy::Notes {
-        return Ok(());
-    }
-
-    let Some(old_context_window) = previous_model_turn_context
-        .model_info()
-        .usable_context_window()
-    else {
-        return Ok(());
-    };
-    let Some(new_context_window) = turn_context.model_info().usable_context_window() else {
-        return Ok(());
-    };
-    let active_context_tokens = sess.get_total_token_usage().await;
-    let previous_model_limit_reached = match turn_context
-        .config
-        .model_auto_compact_token_limit_scope
-    {
-        AutoCompactTokenLimitScope::Total => {
-            let new_auto_compact_limit = turn_context
-                .model_info()
-                .auto_compact_token_limit()
-                .unwrap_or(i64::MAX);
-            active_context_tokens > new_auto_compact_limit
-                || active_context_tokens >= new_context_window
+    let reason = if should_compact_for_comp_hash_change {
+        CompactionReason::CompHashChanged
+    } else {
+        // Selected Notes windows are working budgets, not execution ceilings.
+        if turn_context.config.context_strategy == ContextStrategy::Notes {
+            return Ok(());
         }
-        AutoCompactTokenLimitScope::BodyAfterPrefix => active_context_tokens >= new_context_window,
+        let Some(old_context_window) = previous_model_turn_context
+            .model_info()
+            .usable_context_window()
+        else {
+            return Ok(());
+        };
+        let Some(new_context_window) = turn_context.model_info().usable_context_window() else {
+            return Ok(());
+        };
+        let active_context_tokens = sess.get_total_token_usage().await;
+        let previous_model_limit_reached =
+            match turn_context.config.model_auto_compact_token_limit_scope {
+                AutoCompactTokenLimitScope::Total => {
+                    let new_auto_compact_limit = turn_context
+                        .model_info()
+                        .auto_compact_token_limit()
+                        .unwrap_or(i64::MAX);
+                    active_context_tokens > new_auto_compact_limit
+                        || active_context_tokens >= new_context_window
+                }
+                AutoCompactTokenLimitScope::BodyAfterPrefix => {
+                    active_context_tokens >= new_context_window
+                }
+            };
+        if !previous_model_limit_reached
+            || previous_model_turn_context.model_info().slug == turn_context.model_info().slug
+            || old_context_window <= new_context_window
+        {
+            return Ok(());
+        }
+        CompactionReason::ModelDownshift
     };
-    let should_run = previous_model_limit_reached
-        && previous_model_turn_context.model_info().slug != turn_context.model_info().slug
-        && old_context_window > new_context_window;
-    if should_run {
-        let step_context = sess
-            .capture_step_context(Arc::clone(&previous_model_turn_context), cancellation_token)
-            .await?;
-        let fallback_step_context = capture_current_model_fallback_step_context(
-            sess,
-            turn_context,
-            &previous_model_turn_context,
-            cancellation_token,
-        )
+
+    let step_context = sess
+        .capture_step_context(previous_model_turn_context, cancellation_token)
         .await?;
-        run_auto_compact(
-            sess,
-            step_context,
-            fallback_step_context,
-            client_session,
-            InitialContextInjection::DoNotInject,
-            CompactionReason::ModelDownshift,
-            CompactionPhase::PreTurn,
-        )
+    // The previous model summarizes the old window; the current model owns its replacement.
+    // Reuse the replacement step if the compaction request needs to fall back to that model.
+    let replacement_step_context = sess
+        .capture_speculative_step_context(Arc::clone(turn_context), cancellation_token)
         .await?;
-    }
+    run_auto_compact(
+        sess,
+        step_context,
+        replacement_step_context,
+        client_session,
+        reason,
+        CompactionPhase::PreTurn,
+    )
+    .await?;
     Ok(())
 }
 
+/// The replacement context may use a different model than the compactor.
 #[instrument(
     level = "trace",
     skip_all,
@@ -1553,13 +1513,25 @@ async fn maybe_run_previous_model_inline_compact(
 async fn run_auto_compact(
     sess: &Arc<Session>,
     step_context: Arc<StepContext>,
-    fallback_step_context: Option<Arc<StepContext>>,
+    replacement_step_context: Arc<StepContext>,
     client_session: &mut ModelClientSession,
-    initial_context_injection: InitialContextInjection,
     reason: CompactionReason,
     phase: CompactionPhase,
 ) -> CodexResult<()> {
     let turn_context = &step_context.turn;
+    if matches!(phase, CompactionPhase::PreTurn)
+        && crate::guardian::is_basic_session_source(&turn_context.session_source)
+        && !crate::guardian::should_compact_guardian_input(sess)?
+    {
+        return Ok(());
+    }
+    let world_state = Arc::new(
+        sess.build_world_state_for_step(
+            &replacement_step_context,
+            turn_context.config.context_strategy != ContextStrategy::Notes,
+        )
+        .await?,
+    );
     let _profile_guard = turn_context.turn_timing_state.begin_compaction();
     let _compaction_span = trace_span!(
         "codex.compaction",
@@ -1571,7 +1543,8 @@ async fn run_auto_compact(
         crate::compact::run_inline_emergency_compact_task(
             Arc::clone(sess),
             Arc::clone(turn_context),
-            initial_context_injection,
+            replacement_step_context,
+            world_state,
         )
         .await?;
         return Ok(());
@@ -1587,9 +1560,9 @@ async fn run_auto_compact(
             run_inline_remote_auto_compact_task_v2(
                 Arc::clone(sess),
                 step_context,
-                fallback_step_context,
+                replacement_step_context,
                 client_session,
-                initial_context_injection,
+                world_state,
                 reason,
                 phase,
             )
@@ -1604,7 +1577,8 @@ async fn run_auto_compact(
             run_inline_auto_compact_task(
                 Arc::clone(sess),
                 Arc::clone(turn_context),
-                initial_context_injection,
+                replacement_step_context,
+                world_state,
                 reason,
                 phase,
             )
@@ -1670,6 +1644,7 @@ pub(crate) fn build_prompt(
     input: Vec<ResponseItem>,
     step_context: &StepContext,
     mut base_instructions: BaseInstructions,
+    incremental_tools: bool,
 ) -> Prompt {
     let turn_context = &step_context.turn;
     // Match this request's finalized tools without persisting an inventory in the
@@ -1682,9 +1657,20 @@ pub(crate) fn build_prompt(
     }
     Prompt {
         input,
-        tools: step_context.tool_router.model_visible_specs(),
+        tools: if incremental_tools {
+            Arc::default()
+        } else {
+            step_context.tool_router.model_visible_specs()
+        },
         parallel_tool_calls: true,
-        base_instructions,
+        base_instructions: if incremental_tools {
+            BaseInstructions {
+                text: String::new(),
+                provenance: None,
+            }
+        } else {
+            base_instructions
+        },
         output_schema: turn_context.final_output_json_schema.clone(),
         output_schema_strict: !crate::guardian::is_basic_session_source(
             &turn_context.session_source,
@@ -1770,6 +1756,8 @@ async fn run_sampling_request(
             prompt_input,
             step_context.as_ref(),
             base_instructions.clone(),
+            sess.current_window_uses_incremental_tools(&step_context)
+                .await,
         );
         let responses_metadata = sess
             .responses_metadata(step_context.as_ref(), CodexResponsesRequestKind::Turn)
@@ -2698,6 +2686,9 @@ async fn try_run_sampling_request(
         turn_context.provider.info().name.as_str(),
     );
     let sampling_timing_guard = turn_context.turn_timing_state.begin_sampling();
+    if client_session.inference_tools_changed(&step_context.tool_router.model_visible_specs()) {
+        turn_context.turn_timing_state.record_tools_change();
+    }
     // Do not enter this span: overlapping tools must not retain it past sampling.
     let sampling_span = trace_span!(
         "codex.sampling",
@@ -2900,7 +2891,11 @@ async fn try_run_sampling_request(
 
                 let preempt_for_mailbox_mail = match &item {
                     ResponseItem::Message { role, phase, .. } => {
-                        role == "assistant" && matches!(phase, Some(MessagePhase::Commentary))
+                        role == "assistant"
+                            && matches!(
+                                phase,
+                                Some(MessagePhase::Commentary | MessagePhase::PartialAnswer)
+                            )
                     }
                     ResponseItem::Reasoning { .. } => true,
                     ResponseItem::AgentMessage { .. } => false,

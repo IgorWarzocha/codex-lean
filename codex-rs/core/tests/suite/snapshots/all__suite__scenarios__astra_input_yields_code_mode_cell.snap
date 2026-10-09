@@ -6,21 +6,18 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=8ab50c23d722c358):
-        - namespace/functions; hash=c46f318747af6284
+00:additional_tools/developer (3; hash=122953ebdb0dbcda):
+        - namespace/functions; hash=3bb7f66adc4ea3b1
           - custom/exec
           - function/wait
-          - function/request_user_input
-          - function/request_user_input_async
         - namespace/clock: Read or wait on time; hash=988ad490c20d3305
           - function/sleep
-        - namespace/collaboration: Spawn and manage sub-agents; hash=cfdb23f92902eeb9
+        - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
           - function/send_message
           - function/spawn_agent
-          - function/wait_agent
 01:message/developer:
     Complete the request. Questions only for missing information that changes the work
 
@@ -29,6 +26,7 @@ Scenario: Astra continues after new user input yields a running code cell, then 
     Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
 
     Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
 02:message/developer[2]:
     [01] <permissions instructions>
         `sandbox_mode`: `read-only`. Reads only. Network access: restricted
@@ -42,12 +40,11 @@ Scenario: Astra continues after new user input yields a running code cell, then 
         </permissions instructions>
     [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
 
-        `request_user_input`, when available: optional questions that materially improve the work, never approva... one concise plain-text question</collaboration_mode> [hash=509c010a092a8d4a]
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
 03:message/developer:
     <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    `wait_agent`: waits of minutes preferred over busy polling
-
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]

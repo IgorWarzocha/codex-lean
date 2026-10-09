@@ -75,6 +75,7 @@ use codex_utils_oss::get_default_model_for_oss_provider;
 use color_eyre::eyre::WrapErr;
 use crossterm::SynchronizedUpdate;
 use cwd_prompt::CwdPromptAction;
+pub use daemon_startup::uses_wsl_drvfs;
 pub use session_archive_commands::DeleteConfirmation;
 pub use session_archive_commands::SessionArchiveAction;
 pub use session_archive_commands::SessionArchiveCommandOptions;
@@ -125,6 +126,7 @@ mod clock_format;
 mod collaboration_modes;
 mod color;
 mod config_update;
+mod copy_input_guard;
 pub(crate) mod custom_terminal;
 mod daybreak;
 mod experimental_features;
@@ -652,7 +654,7 @@ pub(crate) async fn start_embedded_app_server_for_picker(
         &mut target,
         Arg0DispatchPaths::default(),
         config.clone(),
-        Vec::new(),
+        crate::test_support::native_test_config_overrides(),
         LoaderOverrides::without_managed_config_for_tests(),
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),
@@ -844,7 +846,11 @@ async fn lookup_latest_session_target_with_app_server(
                 include_non_interactive,
                 lookup_mode,
             ))
-            .await?;
+            .await;
+        let response = match response {
+            Err(_) if lookup_mode == LatestSessionLookupMode::StateDbOnly => continue,
+            response => response?,
+        };
         let target = response
             .data
             .into_iter()
@@ -1988,15 +1994,24 @@ async fn run_ratatui_app(
     let bypass_hook_trust_for_startup_review = config.bypass_hook_trust && !is_persistent_resume;
     let hooks_request_handle = app_server.request_handle();
     let hooks_cwd = config.cwd.to_path_buf();
+    let server_owned_fresh_bootstrap = app::startup_bootstrap::uses_server_owned_fresh_bootstrap(
+        &app_server_target,
+        &session_selection,
+        &loader_overrides,
+    );
     let startup_prefetch_started_at = Instant::now();
     let startup_prefetch = startup_draft
         .run_until(&mut tui, async {
             tokio::join!(
                 async {
-                    match startup_account {
+                    if server_owned_fresh_bootstrap {
+                        return Ok::<_, color_eyre::Report>(None);
+                    }
+                    let bootstrap = match startup_account {
                         Some(account) => app_server.bootstrap_with_account(&config, account).await,
                         None => app_server.bootstrap(&config).await,
-                    }
+                    }?;
+                    Ok(Some(bootstrap))
                 },
                 load_startup_hooks_review_entry(hooks_request_handle, hooks_cwd),
             )
@@ -2014,7 +2029,7 @@ async fn run_ratatui_app(
         return Err(err.into());
     }
     let startup_bootstrap = match startup_bootstrap {
-        Ok(startup_bootstrap) => Some(startup_bootstrap),
+        Ok(startup) => startup,
         Err(err) => {
             shutdown_startup_session(Some(app_server), &mut terminal_restore_guard).await;
             return Err(err);
@@ -2369,6 +2384,7 @@ pub(crate) mod tests {
 
     async fn build_config(temp_dir: &TempDir) -> std::io::Result<Config> {
         ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .codex_home(temp_dir.path().to_path_buf())
             .build()
@@ -2625,6 +2641,7 @@ requires_openai_auth = {requires_openai_auth}
                     format!("[features]\nrespect_system_proxy = {managed_respect_system_proxy}\n"),
                 );
             let config = ConfigBuilder::default()
+                .cli_overrides(crate::test_support::native_test_config_overrides())
                 .codex_home(codex_home.path().to_path_buf())
                 .loader_overrides(loader_overrides)
                 .cloud_config_bundle(cloud_config_bundle)
@@ -2668,7 +2685,7 @@ requires_openai_auth = {requires_openai_auth}
         start_embedded_app_server(
             Arg0DispatchPaths::default(),
             config,
-            Vec::new(),
+            crate::test_support::native_test_config_overrides(),
             LoaderOverrides::default(),
             /*strict_config*/ false,
             CloudConfigBundleLoader::default(),
@@ -2708,6 +2725,7 @@ requires_openai_auth = {requires_openai_auth}
             )?;
             let cwd_override = has_explicit_cwd.then_some(explicit_cwd.as_path());
             let config = ConfigBuilder::default()
+                .cli_overrides(crate::test_support::native_test_config_overrides())
                 .codex_home(codex_home.clone())
                 .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
                 .harness_overrides(ConfigOverrides {
@@ -2760,6 +2778,7 @@ requires_openai_auth = {requires_openai_auth}
                 ResolveCwdOutcome::Exit => panic!("configured cwd should not exit startup"),
             };
             let final_config = ConfigBuilder::default()
+                .cli_overrides(crate::test_support::native_test_config_overrides())
                 .codex_home(codex_home)
                 .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
                 .harness_overrides(ConfigOverrides {
@@ -2823,6 +2842,7 @@ requires_openai_auth = {requires_openai_auth}
             "[tui]\nresume_cwd = \"current\"\n",
         )?;
         let config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(temp_dir.path().to_path_buf())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .build()
@@ -2879,6 +2899,7 @@ requires_openai_auth = {requires_openai_auth}
             "[tui]\nresume_cwd = \"session\"\n",
         )?;
         let config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(temp_dir.path().to_path_buf())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .build()
@@ -3387,6 +3408,7 @@ requires_openai_auth = {requires_openai_auth}
         )?;
 
         let mut config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(temp_dir.path().to_path_buf())
             .harness_overrides(ConfigOverrides {
                 cwd: Some(project_cwd.clone()),
@@ -3486,6 +3508,7 @@ requires_openai_auth = {requires_openai_auth}
         let project_cwd = temp_dir.path().join("project");
         std::fs::create_dir_all(&project_cwd)?;
         let config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(temp_dir.path().to_path_buf())
             .harness_overrides(ConfigOverrides {
                 cwd: Some(project_cwd.clone()),
@@ -3938,6 +3961,7 @@ trust_level = "untrusted"
             ..Default::default()
         };
         let trusted_config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .codex_home(codex_home.clone())
             .harness_overrides(trusted_overrides.clone())
@@ -3953,6 +3977,7 @@ trust_level = "untrusted"
             ..trusted_overrides
         };
         let untrusted_config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .codex_home(codex_home)
             .harness_overrides(untrusted_overrides)

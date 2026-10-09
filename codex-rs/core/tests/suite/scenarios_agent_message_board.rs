@@ -9,6 +9,7 @@ use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::user_input::UserInput;
+use core_test_support::ThreadIdle;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::context_snapshot::SnapshotEntry;
@@ -29,6 +30,7 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
 use tokio::sync::oneshot;
+use wiremock::matchers::header;
 
 #[path = "scenarios_agent_message_board_remote.rs"]
 mod remote;
@@ -84,6 +86,50 @@ fn done() -> String {
         ev_assistant_message("done", "Done."),
         ev_completed("done"),
     ])
+}
+
+// Route worker sequences by thread so parent RESULT autoresumes cannot steal them.
+async fn mount_thread_sequence(
+    server: &wiremock::MockServer,
+    thread_id: codex_protocol::ThreadId,
+    bodies: Vec<String>,
+) {
+    let count = bodies.len();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path_regex(".*/responses$"))
+        .and(header("thread-id", thread_id.to_string()))
+        .respond_with(move |_: &wiremock::Request| {
+            let index = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            responses::sse_response(bodies[index].clone())
+        })
+        .up_to_n_times(count as u64)
+        .expect(count as u64)
+        .mount(server)
+        .await;
+}
+
+async fn start_board_turn(thread: &codex_core::CodexThread, text: &str) -> anyhow::Result<String> {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            match thread
+                .start_turn_if_idle(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: text.into(),
+                    text_elements: vec![],
+                }]))
+                .await?
+            {
+                codex_core::StartIfIdleSubmission::Started { turn_id, .. } => return Ok(turn_id),
+                codex_core::StartIfIdleSubmission::NotSubmitted {
+                    reason:
+                        codex_core::NotSubmittedReason::NotIdle
+                        | codex_core::NotSubmittedReason::PendingTriggerTurn,
+                } => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                other => anyhow::bail!("board turn rejected: {other:?}"),
+            }
+        }
+    })
+    .await?
 }
 
 fn configure(config: &mut codex_core::config::Config) {
@@ -245,11 +291,15 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
     in_memory: bool,
 ) -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
-        configure(config);
-        config.multi_agent_v2.message_board_in_memory = in_memory;
-        config.ephemeral = in_memory;
-    });
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+    extensions.thread_lifecycle_contributor(std::sync::Arc::new(ThreadIdle));
+    let mut builder = test_codex()
+        .with_extensions(std::sync::Arc::new(extensions.build()))
+        .with_config(move |config| {
+            configure(config);
+            config.multi_agent_v2.message_board_in_memory = in_memory;
+            config.ephemeral = in_memory;
+        });
     let root = builder.build_with_auto_env(&server).await?;
     responses::mount_sse_sequence(
         &server,
@@ -265,6 +315,35 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
     .await;
     root.submit_turn("Create the design channel and subscribe.")
         .await?;
+    // V2 child results wake an idle parent independently of board notifications.
+    // A lower-priority root-only responder absorbs those real completion turns without
+    // consuming board action responses or weakening their exact request counts.
+    wiremock::Mock::given(header(
+        "thread-id",
+        root.session_configured.thread_id.to_string(),
+    ))
+    .and(|request: &wiremock::Request| {
+        let body: Value = request.body_json().expect("completion request");
+        assert!(
+            !body["input"]
+                .to_string()
+                .contains("Message Type: CHANNEL_POST"),
+            "idle board subscribers must not receive post notices on result autoresume"
+        );
+        body["input"]
+            .as_array()
+            .expect("request input")
+            .iter()
+            .any(|item| item["type"] == "agent_message")
+    })
+    .respond_with(
+        wiremock::ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string(done()),
+    )
+    .with_priority(10)
+    .mount(&server)
+    .await;
     responses::mount_sse_sequence(
         &server,
         vec![
@@ -274,10 +353,11 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
                 json!({"task_name":"worker","message":"Say ready.","fork_turns":"none"}),
             ),
             done(),
-            done(),
         ],
     )
     .await;
+    responses::mount_sse_once_match(&server, header("x-openai-subagent", "collab_spawn"), done())
+        .await;
     root.submit_turn("Spawn a worker and finish your turn.")
         .await?;
     let child_id = root
@@ -289,8 +369,11 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
         .expect("child runtime");
     let child = root.thread_manager.get_thread(child_id).await?;
     wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    let child_post = responses::mount_sse_sequence(
+    ThreadIdle::wait(&child).await;
+    let child_request_start = responses::received_responses_requests(&server).await.len();
+    mount_thread_sequence(
         &server,
+        child_id,
         vec![
             tool(
                 "worker-post",
@@ -308,17 +391,30 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
         }]))
         .await?;
     wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    let requests = child_post.requests();
-    let output = requests[1]
+    ThreadIdle::wait(&child).await;
+    let child_requests = responses::received_responses_requests(&server)
+        .await
+        .into_iter()
+        .skip(child_request_start)
+        .filter(|request| request.header("thread-id") == Some(child_id.to_string()))
+        .collect::<Vec<_>>();
+    assert_eq!(child_requests.len(), 2);
+    let output = child_requests[1]
         .function_call_output_text("worker-post")
         .expect("child post result");
     let post: Value =
         serde_json::from_str(&output).with_context(|| format!("child post result: {output}"))?;
     assert_eq!(post["author"], "/root/worker");
-    assert!(matches!(
-        root.codex.agent_status().await,
-        codex_protocol::protocol::AgentStatus::Completed(_)
-    ));
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while !matches!(
+            root.codex.agent_status().await,
+            codex_protocol::protocol::AgentStatus::Completed(_)
+        ) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .context("parent completion autoresume should finish")?;
     let read = responses::mount_sse_sequence(
         &server,
         vec![
@@ -331,7 +427,14 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
         ],
     )
     .await;
-    root.submit_turn("Read the worker's decision.").await?;
+    let turn_id = start_board_turn(&root.codex, "Read the worker's decision.").await?;
+    // Result autoresume leaves its lifecycle events on the root queue. Wait for this
+    // specific user turn, rather than accidentally consuming its predecessor's completion.
+    wait_for_event(
+        &root.codex,
+        |event| matches!(event, EventMsg::TurnComplete(event) if event.turn_id == turn_id),
+    )
+    .await;
     assert!(
         read.requests()
             .iter()
@@ -389,6 +492,8 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
     let response = |body| vec![StreamingSseChunk { gate: None, body }];
     let (release_final, final_gate) = oneshot::channel();
     let (release_child, child_gate) = oneshot::channel();
+    let (release_third, third_gate) = oneshot::channel();
+    let (release_fourth, fourth_gate) = oneshot::channel();
     let final_phase = |mut event: Value| {
         event["item"]["phase"] = json!("final_answer");
         event
@@ -419,7 +524,15 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
             "spawn_agent",
             json!({"task_name":"worker","message":"Say ready.","fork_turns":"none"}),
         )),
-        response(done()),
+        vec![StreamingSseChunk {
+            gate: Some(third_gate),
+            body: done(),
+        }],
+        vec![StreamingSseChunk {
+            gate: Some(fourth_gate),
+            body: done(),
+        }],
+        // The child's initial terminal RESULT resumes the idle parent once.
         response(done()),
         vec![
             StreamingSseChunk {
@@ -446,7 +559,10 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
     .await;
     let server = responses::start_mock_server().await;
     let base_url = format!("{}/v1", streaming.uri());
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+    extensions.thread_lifecycle_contributor(std::sync::Arc::new(ThreadIdle));
     let root = test_codex()
+        .with_extensions(std::sync::Arc::new(extensions.build()))
         .with_config(move |config| {
             configure(config);
             config.model_provider.base_url = Some(base_url);
@@ -460,8 +576,30 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
         })
         .build_with_auto_env(&server)
         .await?;
-    root.submit_turn("Create the channel and spawn a worker.")
-        .await?;
+    let initial_turn =
+        start_board_turn(&root.codex, "Create the channel and spawn a worker.").await?;
+    streaming.wait_for_request_count(4).await;
+    let initial_requests = streaming.requests().await;
+    let third_request: Value = serde_json::from_slice(&initial_requests[2])?;
+    let (release_parent, release_initial_child) = if third_request["client_metadata"]["thread_id"]
+        == root.session_configured.thread_id.to_string()
+    {
+        (release_third, release_fourth)
+    } else {
+        (release_fourth, release_third)
+    };
+    release_parent.send(()).expect("finish initial parent turn");
+    wait_for_event(
+        &root.codex,
+        |event| matches!(event, EventMsg::TurnComplete(event) if event.turn_id == initial_turn),
+    )
+    .await;
+    ThreadIdle::wait(&root.codex).await;
+    // Deliver the initial child RESULT only after parent cleanup, making its
+    // legitimate autoresume a distinct fifth request instead of a timing race.
+    release_initial_child
+        .send(())
+        .expect("finish initial child turn");
     let child_id = root
         .thread_manager
         .list_thread_ids()
@@ -471,18 +609,9 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
         .context("child runtime")?;
     let child = root.thread_manager.get_thread(child_id).await?;
     wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-
-    root.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Finish your answer.".into(),
-            text_elements: vec![],
-        }]))
-        .await?;
-    let target_turn = wait_for_event_match(&root.codex, |event| match event {
-        EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
-        _ => None,
-    })
-    .await;
+    ThreadIdle::wait(&child).await;
+    streaming.wait_for_request_count(5).await;
+    let target_turn = start_board_turn(&root.codex, "Finish your answer.").await?;
     wait_for_event(&root.codex, |event| match event {
         EventMsg::ItemStarted(event) => match &event.item {
             TurnItem::AgentMessage(message) => {
@@ -505,7 +634,7 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
         }]))
         .await?;
     // The child's follow-up confirms fanout completed, but its final would separately notify root.
-    streaming.wait_for_request_count(/*count*/ 7).await;
+    streaming.wait_for_request_count(/*count*/ 8).await;
     let requests = streaming.requests().await;
     let request: Value = serde_json::from_slice(requests.last().context("child follow-up")?)?;
     let post = request["input"]
@@ -517,14 +646,20 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
     let post: PostMetadata = serde_json::from_str(post["output"].as_str().context("post output")?)?;
     assert_eq!(post.author.as_str(), "/root/worker");
     release_final.send(()).expect("release root response");
-    wait_for_event(&root.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
+    wait_for_event(
+        &root.codex,
+        |event| matches!(event, EventMsg::TurnComplete(event) if event.turn_id == target_turn),
+    )
     .await;
-    release_child.send(()).expect("release child response");
-    wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-
-    root.submit_turn("Start another turn.").await?;
+    // Keep the child response gated until the next root turn has finished. Its terminal
+    // result is ordinary V2 work and would otherwise legitimately wake/steer the root,
+    // obscuring whether the board notice itself reopened the final answer.
+    let next_turn_id = start_board_turn(&root.codex, "Start another turn.").await?;
+    wait_for_event(
+        &root.codex,
+        |event| matches!(event, EventMsg::TurnComplete(event) if event.turn_id == next_turn_id),
+    )
+    .await;
 
     let requests = streaming
         .requests()
@@ -552,6 +687,7 @@ async fn board_notifications_do_not_reopen_a_final_answer(after_final: bool) -> 
         );
     }
     child.shutdown_and_wait().await?;
+    let _ = release_child.send(());
     root.codex.shutdown_and_wait().await?;
     streaming.shutdown().await;
     Ok(())

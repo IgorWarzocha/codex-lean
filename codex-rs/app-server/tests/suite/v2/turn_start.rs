@@ -584,11 +584,13 @@ async fn turn_start_with_empty_input_runs_model_request() -> Result<()> {
         })
         .await?;
     assert!(!turn.id.is_empty());
+    assert_eq!(turn.root_turn_id.as_deref(), Some(turn.id.as_str()));
 
     let started: TurnStartedNotification =
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("turn/started")).await??;
     assert_eq!(started.thread_id, thread.id);
     assert_eq!(started.turn.id, turn.id);
+    assert_eq!(started.turn.root_turn_id.as_deref(), Some(turn.id.as_str()));
     assert_eq!(started.turn.status, TurnStatus::InProgress);
 
     let completed: TurnCompletedNotification = timeout(
@@ -598,6 +600,10 @@ async fn turn_start_with_empty_input_runs_model_request() -> Result<()> {
     .await??;
     assert_eq!(completed.thread_id, thread.id);
     assert_eq!(completed.turn.id, turn.id);
+    assert_eq!(
+        completed.turn.root_turn_id.as_deref(),
+        Some(turn.id.as_str())
+    );
     assert_eq!(completed.turn.status, TurnStatus::Completed);
     assert_eq!(completed.turn.items_view, TurnItemsView::Summary);
     assert!(matches!(
@@ -704,16 +710,17 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
                     text_elements: Vec::new(),
                 }],
                 turn_trigger: Some("goal".to_string()),
+                parent_turn_id: Some("initiating-turn".to_string()),
+                root_turn_id: Some("causal-root".to_string()),
                 cyber_access_program: Some(CyberAccessProgram::DaybreakBlue),
                 ..Default::default()
             },
         })
         .await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/started"),
-    )
-    .await??;
+    let started: TurnStartedNotification =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("turn/started")).await??;
+    assert_eq!(active_turn.root_turn_id.as_deref(), Some("causal-root"));
+    assert_eq!(started.turn.root_turn_id.as_deref(), Some("causal-root"));
     timeout(
         DEFAULT_READ_TIMEOUT,
         server.wait_for_request_count(/*count*/ 1),
@@ -747,21 +754,25 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
                     text_elements: Vec::new(),
                 }],
                 turn_trigger: Some("user".to_string()),
+                parent_turn_id: Some("steering-turn".to_string()),
+                root_turn_id: Some("steering-root".to_string()),
                 cyber_access_program: Some(CyberAccessProgram::Standard),
                 ..Default::default()
             },
         })
         .await?;
     assert_eq!(steered_turn.id, active_turn.id);
+    assert_eq!(steered_turn.root_turn_id, active_turn.root_turn_id);
 
     release_response
         .send(())
         .expect("active response gate should remain open");
-    timeout(
+    let completed: TurnCompletedNotification = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
+        mcp.read_notification("turn/completed"),
     )
     .await??;
+    assert_eq!(completed.turn.root_turn_id.as_deref(), Some("causal-root"));
 
     let requests = server.requests().await;
     assert_eq!(requests.len(), 2);
@@ -774,6 +785,8 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
                 .context("expected x-codex-turn-metadata")?,
         )?;
         assert_eq!(turn_metadata["turn_trigger"].as_str(), Some("goal"));
+        assert_eq!(turn_metadata["parent_turn_id"], "initiating-turn");
+        assert_eq!(turn_metadata["root_turn_id"], "causal-root");
     }
     Ok(())
 }
@@ -993,7 +1006,7 @@ async fn turn_start_emits_user_message_item_with_text_elements() -> Result<()> {
 }
 
 #[tokio::test]
-async fn turn_start_emits_thread_scoped_warning_notification_for_trimmed_skills() -> Result<()> {
+async fn turn_start_keeps_skill_discovery_on_demand_with_small_context() -> Result<()> {
     let responses = vec![create_final_assistant_message_sse_response("Done")?];
     let server = create_mock_responses_server_sequence_unchecked(responses).await;
 
@@ -1051,18 +1064,24 @@ async fn turn_start_emits_thread_scoped_warning_notification_for_trimmed_skills(
         })
         .await?;
 
-    let warning: WarningNotification =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("warning")).await??;
-    assert_eq!(warning.thread_id.as_deref(), Some(thread.id.as_str()));
-    assert_eq!(
-        warning.message,
-        "Exceeded skills context budget. All skill descriptions were removed and 6 additional skills were not included in the model-visible skills list."
-    );
-
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
+    timeout(DEFAULT_READ_TIMEOUT, async {
+        loop {
+            if let JSONRPCMessage::Notification(notification) = mcp.read_next_message().await? {
+                if notification.method == "warning" {
+                    let warning: WarningNotification =
+                        serde_json::from_value(notification.params.expect("warning params"))?;
+                    assert!(
+                        !warning
+                            .message
+                            .starts_with("Exceeded skills context budget.")
+                    );
+                }
+                if notification.method == "turn/completed" {
+                    break Ok::<(), anyhow::Error>(());
+                }
+            }
+        }
+    })
     .await??;
 
     let requests = server
@@ -1073,12 +1092,12 @@ async fn turn_start_emits_thread_scoped_warning_notification_for_trimmed_skills(
         .last()
         .expect("expected at least one model request");
     assert!(
-        body_contains(request, "## Skills"),
-        "expected outgoing request to include the skills section"
+        body_contains(request, "Skills: List once at session start"),
+        "expected on-demand skills guidance"
     );
     assert!(
         !body_contains(request, "- alpha-skill:") && !body_contains(request, "- beta-skill:"),
-        "expected trimmed skills to be omitted from the outgoing request body"
+        "skill catalogs must not be injected eagerly"
     );
 
     Ok(())
@@ -2563,9 +2582,7 @@ async fn turn_start_accepts_collaboration_mode_override_v2() -> Result<()> {
     let payload = request.body_json();
     assert_eq!(payload["model"].as_str(), Some("mock-model-collab"));
     let payload_text = payload.to_string();
-    assert!(payload_text.contains(
-        "Use the `request_user_input` tool only when it is listed in the available tools"
-    ));
+    assert!(payload_text.contains("`request_user_input`, when available: optional questions"));
 
     Ok(())
 }
@@ -2792,7 +2809,7 @@ async fn turn_start_ignores_deprecated_multi_agent_mode() -> Result<()> {
         .message_input_texts("developer");
     assert!(developer_texts.iter().any(|text| {
         text.contains(
-            "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents",
+            "Agent spawning only on explicit request from the user or applicable AGENTS.md or skill instructions",
         )
     }));
     assert!(
@@ -2865,7 +2882,7 @@ async fn thread_start_ignores_deprecated_multi_agent_mode() -> Result<()> {
     assert!(developer_texts.iter().any(|text| {
         text.contains(MULTI_AGENT_MODE_OPEN_TAG)
             && text.contains(
-                "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents",
+                "Agent spawning only on explicit request from the user or applicable AGENTS.md or skill instructions",
             )
     }));
     assert!(
@@ -2877,8 +2894,14 @@ async fn thread_start_ignores_deprecated_multi_agent_mode() -> Result<()> {
     Ok(())
 }
 
+#[test_case(Personality::Pragmatic, Personality::Friendly; "friendly")]
+#[test_case(Personality::Friendly, Personality::Pragmatic; "pragmatic")]
+#[test_case(Personality::Friendly, Personality::None; "none")]
 #[tokio::test]
-async fn turn_start_ignores_personality_change_mid_thread_v2() -> Result<()> {
+async fn turn_start_reports_personality_overrides_v2(
+    first_personality: Personality,
+    next_personality: Personality,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -2919,7 +2942,7 @@ async fn turn_start_ignores_personality_change_mid_thread_v2() -> Result<()> {
                     text: "Hello".to_string(),
                     text_elements: Vec::new(),
                 }],
-                personality: None,
+                personality: Some(first_personality),
                 ..Default::default()
             },
         })
@@ -2930,6 +2953,7 @@ async fn turn_start_ignores_personality_change_mid_thread_v2() -> Result<()> {
         mcp.read_stream_until_notification_message("turn/completed"),
     )
     .await??;
+    mcp.clear_message_buffer();
 
     let _turn2: TurnStartResponse = mcp
         .request(|request_id| ClientRequest::TurnStart {
@@ -2941,11 +2965,21 @@ async fn turn_start_ignores_personality_change_mid_thread_v2() -> Result<()> {
                     text: "Hello again".to_string(),
                     text_elements: Vec::new(),
                 }],
-                personality: Some(Personality::Friendly),
+                personality: Some(next_personality),
                 ..Default::default()
             },
         })
         .await?;
+
+    let settings_updated: ThreadSettingsUpdatedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("thread/settings/updated"),
+    )
+    .await??;
+    assert_eq!(
+        settings_updated.thread_settings.personality,
+        Some(next_personality)
+    );
 
     timeout(
         DEFAULT_READ_TIMEOUT,
@@ -2956,22 +2990,10 @@ async fn turn_start_ignores_personality_change_mid_thread_v2() -> Result<()> {
     let requests = response_mock.requests();
     assert_eq!(requests.len(), 2, "expected two requests");
 
-    let first_developer_texts = requests[0].message_input_texts("developer");
-    assert_fallback_model_instructions(&requests[0]);
-    assert!(
-        first_developer_texts
-            .iter()
-            .all(|text| !text.contains("<personality_spec>")),
-        "expected no personality update message in first request, got {first_developer_texts:?}"
-    );
-
-    let second_developer_texts = requests[1].message_input_texts("developer");
-    assert_fallback_model_instructions(&requests[1]);
-    assert!(
-        second_developer_texts
-            .iter()
-            .all(|text| !text.contains("<personality_spec>")),
-        "deprecated personality change emitted a developer update: {second_developer_texts:?}"
+    assert_eq!(
+        requests[1].instructions_text(),
+        requests[0].instructions_text(),
+        "turn updates preserve the original base instructions"
     );
 
     Ok(())
@@ -3478,6 +3500,8 @@ async fn turn_start_explicit_local_environment_updates_legacy_cwd_between_turns(
                     text_elements: Vec::new(),
                 }],
                 turn_trigger: None,
+                parent_turn_id: None,
+                root_turn_id: None,
                 tool_output: None,
                 responsesapi_client_metadata: None,
                 additional_context: None,
@@ -3531,6 +3555,8 @@ async fn turn_start_explicit_local_environment_updates_legacy_cwd_between_turns(
                     text_elements: Vec::new(),
                 }],
                 turn_trigger: None,
+                parent_turn_id: None,
+                root_turn_id: None,
                 tool_output: None,
                 responsesapi_client_metadata: None,
                 additional_context: None,
@@ -4366,6 +4392,7 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
         .enable_feature(Feature::Collab)
+        .disable_feature(Feature::MultiAgentV2)
         .with_root_config(&format!(
             "chatgpt_base_url = \"{}\"\ntools.update_plan.enabled = true",
             server.uri()
@@ -5010,6 +5037,7 @@ async fn turn_start_emits_spawn_agent_item_with_effective_role_model_metadata_v2
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
         .enable_feature(Feature::Collab)
+        .disable_feature(Feature::MultiAgentV2)
         .write(codex_home.path())?;
     std::fs::write(
         codex_home.path().join("custom-role.toml"),

@@ -54,7 +54,6 @@ use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_message_item_added;
 use core_test_support::responses::ev_output_text_delta;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
@@ -295,11 +294,12 @@ async fn streamed_question_precedes_reply_across_resume(
         .with_model("gpt-5.4")
         .with_history_mode(ThreadHistoryMode::Paginated)
         .with_config(|config| {
-            config.experimental_thread_store = ThreadStoreConfig::Local;
+            // This fixture retains the question by allowing its response to finish.
             config
                 .features
-                .enable(Feature::GuardianThreadContext)
-                .expect("enable retained context");
+                .disable(Feature::InstantInterrupt)
+                .expect("disable InstantInterrupt feature");
+            config.experimental_thread_store = ThreadStoreConfig::Local;
         })
         .build_with_streaming_server(&server)
         .await?;
@@ -388,8 +388,12 @@ async fn compact_and_assert_answers(
 ) -> Result<RetainedContext> {
     // Inspect live state by persisting a real compaction checkpoint, not a private getter.
     // Repeating this after legacy rollback replay also catches checkpoint resurrection.
-    thread.submit(Op::Compact).await?;
-    wait_for_event(thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    let compact_turn = thread.submit(Op::Compact).await?;
+    wait_for_event(
+        thread,
+        |event| matches!(event, EventMsg::TurnComplete(done) if done.turn_id == compact_turn),
+    )
+    .await;
     thread.flush_rollout().await?;
     let history = load_context(test, thread).await?;
     let checkpoint = history
@@ -417,8 +421,17 @@ async fn remote_compact_and_assert_answers(
     server: &MockServer,
     expected: &[VerifiedAnswer],
 ) -> Result<RetainedContext> {
-    let compact = mount_sse_once(
+    let compact = mount_sse_once_match(
         server,
+        |request: &wiremock::Request| {
+            request.body_json::<serde_json::Value>().is_ok_and(|body| {
+                body["input"].as_array().is_some_and(|items| {
+                    items
+                        .iter()
+                        .any(|item| item["type"] == "compaction_trigger")
+                })
+            })
+        },
         sse(vec![
             json!({"type": "response.output_item.done", "item": {
                 "type": "compaction", "encrypted_content": "Retained authorization checkpoint."
@@ -1313,6 +1326,27 @@ async fn retained_answers_cross_real_session_boundaries(
         "message": "Inspect without publishing.",
         "fork_turns": "all",
     });
+    // Child completion can resume an already-idle V2 parent. It must not consume
+    // the next compaction response or turn a stale TurnComplete into its completion.
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/responses"))
+        .and(|request: &wiremock::Request| {
+            !request.headers.contains_key("x-openai-subagent")
+                && String::from_utf8_lossy(&request.body).contains("spawn")
+                && request.body_json::<serde_json::Value>().is_ok_and(|body| {
+                    body["input"].as_array().is_some_and(|items| {
+                        !items
+                            .iter()
+                            .any(|item| item["type"] == "compaction_trigger")
+                    })
+                })
+        })
+        .respond_with(core_test_support::responses::sse_response(sse(vec![
+            ev_completed("parent-completion-notification"),
+        ])))
+        .with_priority(6)
+        .mount(&server)
+        .await;
     mount_sse_sequence(
         &server,
         vec![

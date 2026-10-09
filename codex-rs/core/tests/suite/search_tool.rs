@@ -656,6 +656,7 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         Some(json!({
             "_codex_apps": {
                 "call_id": "calendar-call-1",
+                "root_turn_id": mock.requests()[0].body_json()["client_metadata"]["turn_id"],
                 "resource_uri": CALENDAR_CREATE_EVENT_RESOURCE_URI,
                 "contains_mcp_source": true,
                 "connector_id": "calendar",
@@ -678,6 +679,7 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         apps_tool_call.pointer("/params/_meta/_codex_apps"),
         Some(&json!({
             "call_id": "calendar-call-1",
+            "root_turn_id": first_request_body["client_metadata"]["turn_id"],
             "resource_uri": CALENDAR_CREATE_EVENT_RESOURCE_URI,
             "contains_mcp_source": true,
             "connector_id": "calendar",
@@ -929,8 +931,7 @@ async fn tool_search_returns_deferred_v1_multi_agent_tools() -> Result<()> {
     assert!(description.contains(
         "Spawn only on explicit user or applicable AGENTS.md/skill request for sub-agents, delegation, or parallel agent work"
     ));
-    assert!(description.contains("Avoid duplicate work and overlapping write scopes."));
-    assert!(description.contains("Keep immediate blockers local."));
+    assert!(description.contains("Model overrides only at user's explicit request"));
 
     Ok(())
 }

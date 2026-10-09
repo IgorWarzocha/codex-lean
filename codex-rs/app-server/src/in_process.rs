@@ -838,6 +838,11 @@ mod tests {
     use tempfile::TempDir;
 
     async fn build_test_config(codex_home: &Path) -> Config {
+        std::fs::write(
+            codex_home.join("config.toml"),
+            "context_strategy = 'compaction'\n[features.code_mode]\nenabled = false\nruntime = 'v8'\n",
+        )
+        .expect("write ordinary in-process fixture config");
         match ConfigBuilder::default()
             .codex_home(codex_home.to_path_buf())
             .build()
@@ -1033,6 +1038,7 @@ mod tests {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
                     id: "turn-1".to_string(),
+                    root_turn_id: None,
                     items: Vec::new(),
                     items_view: TurnItemsView::NotLoaded,
                     status: TurnStatus::Completed,

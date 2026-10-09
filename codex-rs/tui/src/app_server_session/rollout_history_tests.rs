@@ -16,6 +16,7 @@ use tempfile::TempDir;
 
 async fn build_config(temp_dir: &TempDir) -> Config {
     ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(temp_dir.path().to_path_buf())
         .build()
         .await
@@ -171,6 +172,7 @@ async fn remote_resume_restores_saved_server_profile_without_permission_override
         "server-only"
     );
     let explicit_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .harness_overrides(crate::legacy_core::config::ConfigOverrides {
             sandbox_mode: Some(codex_protocol::config_types::SandboxMode::ReadOnly),
@@ -203,6 +205,7 @@ async fn remote_resume_restores_saved_server_profile_without_permission_override
         ..Default::default()
     };
     let config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .harness_overrides(overrides.clone())
         .build()

@@ -3,7 +3,17 @@
 use super::*;
 use crate::app::startup::prepare_fresh_startup_config;
 use crate::app::startup::startup_model;
+use crate::app::startup_bootstrap::bootstrap_server_owned_start;
 use pretty_assertions::assert_eq;
+
+fn remote_target() -> AppServerTarget {
+    AppServerTarget::Remote {
+        endpoint: crate::RemoteAppServerEndpoint::WebSocket {
+            websocket_url: "ws://127.0.0.1:1".into(),
+            auth_token: None,
+        },
+    }
+}
 
 async fn run_startup_for_test(
     tui: &mut crate::tui::Tui,
@@ -11,6 +21,7 @@ async fn run_startup_for_test(
     config: Config,
     bootstrap: AppServerBootstrap,
     selection: SessionSelection,
+    app_server_target: AppServerTarget,
 ) -> Result<AppExitInfo> {
     App::run(
         tui,
@@ -27,7 +38,7 @@ async fn run_startup_for_test(
         codex_feedback::CodexFeedback::new(),
         /*is_first_run*/ false,
         /*should_prompt_windows_sandbox_nux_at_startup*/ false,
-        AppServerTarget::Embedded,
+        app_server_target,
         /*state_db*/ None,
         Arc::new(EnvironmentManager::default_for_tests()),
         Duration::ZERO,
@@ -39,6 +50,68 @@ async fn run_startup_for_test(
         /*daemon_cli_executable*/ None,
     )
     .await
+}
+
+#[tokio::test]
+async fn agents_overview_startup_restores_saved_grouping() -> Result<()> {
+    let home = tempdir()?;
+    std::fs::write(
+        home.path().join("config.toml"),
+        "[tui]\nagents_overview_grouping = \"status\"\nanimations = false\n",
+    )?;
+    let config = ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
+        .build()
+        .await?;
+    let (mut server, requests, proxy) = start_recording_remote_app_server(&config).await?;
+    let bootstrap = server.bootstrap(&config).await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.pause_events();
+    let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:4500")?;
+    let mut run = Box::pin(run_startup_for_test(
+        &mut tui,
+        server,
+        config,
+        bootstrap,
+        SessionSelection::AgentsOverview,
+        AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
+            endpoint,
+        },
+    ));
+    tokio::time::timeout(Duration::from_secs(/*secs*/ 15), async {
+        loop {
+            if !recorded_params(&requests, "thread/list").is_empty() {
+                return Ok::<(), color_eyre::eyre::Report>(());
+            }
+            tokio::select! {
+                _ = &mut run => return Ok(()),
+                () = tokio::time::sleep(Duration::from_millis(/*millis*/ 20)) => {}
+            }
+        }
+    })
+    .await??;
+    drop(run);
+    let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+    let rendered = buffer
+        .content
+        .chunks(buffer.area.width as usize)
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let grouping_header = rendered
+        .lines()
+        .find(|line| line.contains("Group:"))
+        .expect("production startup renders Command Center grouping")
+        .trim();
+    insta::assert_snapshot!(grouping_header, @"Agent command center  Group: Status  g");
+    proxy.abort();
+    Ok(())
 }
 
 #[tokio::test]
@@ -114,6 +187,7 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
             cwd: None,
             history_mode: None,
         }),
+        AppServerTarget::Embedded,
     ));
     tokio::time::timeout(Duration::from_secs(/*secs*/ 15), async {
         loop {
@@ -155,6 +229,7 @@ async fn run_until_thread_start(
         config,
         bootstrap,
         SessionSelection::StartFresh,
+        AppServerTarget::Embedded,
     ));
     tokio::time::timeout(Duration::from_secs(/*secs*/ 15), async {
         loop {
@@ -204,7 +279,7 @@ async fn fresh_startup_uses_server_defaults_with_explicit_and_managed_precedence
             Some("low"),
             None,
         ),
-        ("managed", true, None, None, None),
+        ("managed", true, Some("managed-model"), Some("medium"), None),
     ] {
         let client_home = tempdir()?;
         let server_home = tempdir()?;
@@ -224,7 +299,11 @@ requires_openai_auth = false
         // Server defaults are exercised without authenticated backend notes storage.
         std::fs::write(
             server_home.path().join("config.toml"),
-            "context_strategy = \"compaction\"\nmodel = \"server-model\"\nmodel_reasoning_effort = \"high\"\n",
+            if choice == "managed" {
+                "context_strategy = \"compaction\"\n"
+            } else {
+                "context_strategy = \"compaction\"\nmodel = \"server-model\"\nmodel_reasoning_effort = \"high\"\n"
+            },
         )?;
         if managed {
             std::fs::write(
@@ -278,6 +357,7 @@ requires_openai_auth = false
         let mut server_config = config.clone();
         server_config.codex_home = server_home.path().to_path_buf().abs();
         server_config.sqlite = SqliteConfig::new_for_testing(server_home.path().abs());
+        server_config.model_catalog = Some(Default::default());
         let (mut server, requests, proxy) = start_recording_app_server_with_history(
             &server_config,
             HistoryCapabilities::Current,
@@ -292,18 +372,28 @@ requires_openai_auth = false
         )
         .await?;
         server = server.with_remote_cwd_override(Some(server_config.cwd.to_path_buf()));
-        server.bootstrap(&config).await?;
+        let target = remote_target();
         assert!(
             prepare_fresh_startup_config(
                 &mut config,
                 &server,
+                &target,
                 &cli_kv_overrides,
                 &harness_overrides,
-                &EnvironmentManager::default_for_tests()
+                &EnvironmentManager::default_for_tests(),
             )
             .await?
             .server_defaults_read
         );
+        bootstrap_server_owned_start(
+            &mut server,
+            &mut config,
+            &mut launch_choices,
+            /*server_defaults_read*/ true,
+            &cli_kv_overrides,
+            &harness_overrides,
+        )
+        .await?;
         if choice == "migration" {
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
             apply_accepted_model_migration(
@@ -364,12 +454,12 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         let launch_cwd = tempdir()?;
         std::fs::write(
             client_home.path().join("config.toml"),
-            "model = \"stale-client-model\"\nmodel_reasoning_effort = \"low\"\n",
+            "model = \"stale-client-model\"\nmodel_reasoning_effort = \"low\"\nmodel_reasoning_summary = \"detailed\"\nfeatures.concurrent_reasoning_summaries = true\n",
         )?;
         // The embedded destination server has no backend notes authentication.
         std::fs::write(
             server_home.path().join("config.toml"),
-            "context_strategy = \"compaction\"\nmodel_reasoning_effort = \"high\"\nsandbox_mode = \"read-only\"\n",
+            "context_strategy = \"compaction\"\nmodel_reasoning_effort = \"high\"\nsandbox_mode = \"read-only\"\nmodel_reasoning_summary = \"concise\"\n",
         )?;
         let mut config = ConfigBuilder::default()
             .codex_home(client_home.path().to_path_buf())
@@ -403,12 +493,22 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         if override_cwd {
             server = server.with_remote_cwd_override(Some(launch_cwd.path().to_path_buf()));
         }
+        if !remote {
+            // Direct starts must inherit summaries even without a preceding defaults read.
+            server.start_thread(&config).await?;
+        }
         assert!(config.config_layer_stack.is_projectless());
+        let target = if remote {
+            remote_target()
+        } else {
+            AppServerTarget::Embedded
+        };
         let bootstrap = server.bootstrap(&config).await?;
         assert_eq!(bootstrap.default_model, "stale-client-model");
         let defaults_read = prepare_fresh_startup_config(
             &mut config,
             &server,
+            &target,
             &[],
             &ConfigOverrides::default(),
             &EnvironmentManager::default_for_tests(),
@@ -441,9 +541,18 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
                 )
         );
         let starts = recorded_params(&requests, "thread/start");
-        assert_eq!(starts.len(), 1);
-        assert_eq!(starts[0]["model"], serde_json::Value::Null);
-        assert!(starts[0]["config"].get("model_reasoning_effort").is_none());
+        assert_eq!(starts.len(), if remote { 1 } else { 2 });
+        let latest = starts.last().unwrap();
+        assert_eq!(latest["model"], serde_json::Value::Null);
+        assert!(latest["config"].get("model_reasoning_effort").is_none());
+        for start in &starts {
+            assert!(start["config"].get("model_reasoning_summary").is_none());
+            assert!(
+                start["config"]["features"]
+                    .get("concurrent_reasoning_summaries")
+                    .is_none()
+            );
+        }
         let (mut app, _, _) = make_test_app_with_channels().await;
         app.chat_widget.handle_thread_session_quiet(started.session);
         if !remote {
@@ -603,6 +712,7 @@ async fn startup_read_failure_exits_before_thread_creation() -> Result<()> {
         config,
         bootstrap,
         SessionSelection::StartFresh,
+        AppServerTarget::Embedded,
     )
     .await;
     insta::assert_snapshot!(result.expect_err("startup read must fail").to_string(), @"config/read failed in TUI");

@@ -476,6 +476,7 @@ async fn multi_agent_v2_wait_guidance_uses_overridable_developer_instructions(
     .await;
     let test = test_codex()
         .with_config(move |config| {
+            config.multi_agent_v2.wait_agent_enabled = true;
             config
                 .features
                 .enable(Feature::MultiAgentV2)
@@ -543,6 +544,10 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
         .with_config(move |config| {
             config.multi_agent_v2.root_agent_usage_hint_text =
                 Some(legacy_root_agent_usage_hint_text.to_string());
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 fixture");
         })
         .build_with_auto_env(&server)
         .await?;
@@ -620,6 +625,10 @@ async fn multi_agent_v2_cold_resume_refreshes_legacy_usage_hints_once(
     )
     .await;
     let mut resumed_builder = test_codex().with_config(move |config| {
+        config
+            .features
+            .enable(Feature::MultiAgentV2)
+            .expect("enable V2 fixture");
         if let Some(root_agent_usage_hint_text) = resumed_root_agent_usage_hint_text {
             config.multi_agent_v2.root_agent_usage_hint_text = Some(root_agent_usage_hint_text);
         }
@@ -712,6 +721,12 @@ async fn multi_agent_v2_resume_refreshes_changed_wait_guidance(
             std::fs::write(home.join("config.toml"), &initial_config_toml)
                 .expect("write initial multi-agent configuration");
         })
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 fixture");
+        })
         .build_with_auto_env(&server)
         .await?;
 
@@ -758,7 +773,15 @@ async fn multi_agent_v2_resume_refreshes_changed_wait_guidance(
         ],
     )
     .await;
-    let resumed = test_codex().resume(&server, home, rollout_path).await?;
+    let resumed = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 fixture");
+        })
+        .resume(&server, home, rollout_path)
+        .await?;
 
     resumed
         .submit_turn("first turn with updated wait-agent availability")
@@ -849,6 +872,12 @@ wait_agent_enabled = {wait_agent_enabled}
         .with_pre_build_hook(move |home| {
             std::fs::write(home.join("config.toml"), &config_toml)
                 .expect("write multi-agent configuration");
+        })
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 fixture");
         })
         .build_with_auto_env(&server)
         .await?;

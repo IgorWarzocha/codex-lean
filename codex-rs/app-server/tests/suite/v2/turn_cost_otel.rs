@@ -86,6 +86,7 @@ async fn chatgpt_turn_cost_reaches_otlp_on_success() -> Result<()> {
         format!(
             r#"
 model = "mock-model"
+context_strategy = "compaction"
 model_provider = "openai"
 openai_base_url = "{}/v1"
 chatgpt_base_url = "{}"
@@ -94,6 +95,7 @@ approval_policy = "never"
 responses_websockets = false
 responses_websockets_v2 = false
 runtime_metrics = true
+code_mode = {{ enabled = false, runtime = "v8" }}
 [analytics]
 enabled = true
 [otel]

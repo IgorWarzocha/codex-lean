@@ -47,6 +47,7 @@ use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
 use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::local;
+use core_test_support::test_codex::local_request;
 use core_test_support::test_codex::test_codex as base_test_codex;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_mcp_server;
@@ -77,10 +78,16 @@ fn test_codex() -> TestCodexBuilder {
             .expect("test backend authentication"),
         )
         .with_config(|config| {
-            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            let base_url = config
+                .model_provider
+                .base_url
+                .as_ref()
+                .expect("mock provider has a base URL");
             config.model_provider.base_url = Some(format!(
                 "{}/backend-api/codex",
-                base_url.strip_suffix("/v1").unwrap()
+                base_url
+                    .strip_suffix("/v1")
+                    .expect("mock provider URL ends in /v1")
             ));
         })
 }
@@ -120,7 +127,7 @@ async fn omitted_context_strategy_starts_a_real_notes_session() -> Result<()> {
     );
     let thread = manager
         .start_thread(StartThreadOptions {
-            environments: Some(vec![local(config.cwd.clone())]),
+            environments: Some(vec![local_request(config.cwd.clone())]),
             ..StartThreadOptions::new(config)
         })
         .await?

@@ -31,6 +31,7 @@ proxy_url = "http://127.0.0.1:43128"
 "#,
     )?;
     let proxied = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .loader_overrides(codex_config::LoaderOverrides::without_managed_config_for_tests())
         .build()
@@ -150,6 +151,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
         "default_permissions = \":workspace\"\n[permissions.shared]\nextends = \":workspace\"\n",
     )?;
     let server_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().into())
         .build()
         .await?;
@@ -164,6 +166,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
         "default_permissions = \":workspace\"\n[permissions.shared]\nextends = \":danger-full-access\"\n",
     )?;
     let client_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(client_home.path().into())
         .build()
         .await?;

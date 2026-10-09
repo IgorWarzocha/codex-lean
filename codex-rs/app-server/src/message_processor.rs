@@ -1283,16 +1283,21 @@ impl MessageProcessor {
                 .await
                 .map(|response| Some(response.into())),
             ClientRequest::ThreadStart { params, .. } => {
-                self.thread_processor
-                    .thread_start(
-                        request_id.clone(),
-                        params,
-                        app_server_client_name.clone(),
-                        client_version.clone(),
-                        client_mcp_extensions.clone(),
-                        request_context,
-                    )
-                    .await
+                // Lifecycle handlers carry large initialization futures. Box the whole
+                // branch so their construction temporaries stay out of RPC dispatch.
+                Box::pin(async {
+                    self.thread_processor
+                        .thread_start(
+                            request_id.clone(),
+                            params,
+                            app_server_client_name.clone(),
+                            client_version.clone(),
+                            client_mcp_extensions.clone(),
+                            request_context,
+                        )
+                        .await
+                })
+                .await
             }
             ClientRequest::ThreadUnsubscribe { params, .. } => {
                 let thread_id = params.thread_id.clone();
@@ -1306,26 +1311,32 @@ impl MessageProcessor {
                 Ok(response)
             }
             ClientRequest::ThreadResume { params, .. } => {
-                self.thread_processor
-                    .thread_resume(
-                        ThreadResumeTarget::Client(request_id.clone()),
-                        params,
-                        app_server_client_name.clone(),
-                        client_version.clone(),
-                        client_mcp_extensions.clone(),
-                    )
-                    .await
+                Box::pin(async {
+                    self.thread_processor
+                        .thread_resume(
+                            ThreadResumeTarget::Client(request_id.clone()),
+                            params,
+                            app_server_client_name.clone(),
+                            client_version.clone(),
+                            client_mcp_extensions.clone(),
+                        )
+                        .await
+                })
+                .await
             }
             ClientRequest::ThreadFork { params, .. } => {
-                self.thread_processor
-                    .thread_fork(
-                        request_id.clone(),
-                        params,
-                        app_server_client_name.clone(),
-                        client_version.clone(),
-                        client_mcp_extensions.clone(),
-                    )
-                    .await
+                Box::pin(async {
+                    self.thread_processor
+                        .thread_fork(
+                            request_id.clone(),
+                            params,
+                            app_server_client_name.clone(),
+                            client_version.clone(),
+                            client_mcp_extensions.clone(),
+                        )
+                        .await
+                })
+                .await
             }
             ClientRequest::ThreadArchive { params, .. } => {
                 self.thread_processor
@@ -1473,14 +1484,17 @@ impl MessageProcessor {
                     .await
             }
             ClientRequest::ThreadRevert { params, .. } => {
-                self.thread_processor
-                    .thread_revert(
-                        request_id.clone(),
-                        params,
-                        app_server_client_name.clone(),
-                        client_version.clone(),
-                    )
-                    .await
+                Box::pin(async {
+                    self.thread_processor
+                        .thread_revert(
+                            request_id.clone(),
+                            params,
+                            app_server_client_name.clone(),
+                            client_version.clone(),
+                        )
+                        .await
+                })
+                .await
             }
             ClientRequest::ThreadList { params, .. } => {
                 self.thread_processor.thread_list(params).await
@@ -1916,3 +1930,7 @@ mod message_processor_tracing_tests;
 #[cfg(test)]
 #[path = "message_processor_gateway_oauth_tests.rs"]
 mod gateway_oauth_tests;
+
+#[cfg(test)]
+#[path = "message_processor_thread_lifecycle_tests.rs"]
+mod thread_lifecycle_tests;

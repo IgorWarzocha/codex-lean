@@ -2995,7 +2995,10 @@ async fn permission_request_hook_allows_exec_command_without_user_approval() -> 
 
     let server = start_mock_server().await;
     let call_id = "permissionrequest-exec-command";
-    let marker = std::env::temp_dir().join("permissionrequest-exec-command-marker");
+    let marker_dir = TempDir::new()?;
+    let marker = marker_dir
+        .path()
+        .join("permissionrequest-exec-command-marker");
     let command = format!("rm -f {}", marker.display());
     let args = serde_json::json!({ "cmd": command });
     let responses = mount_sse_sequence(
@@ -3038,10 +3041,10 @@ async fn permission_request_hook_allows_exec_command_without_user_approval() -> 
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 2);
-    requests[1].function_call_output(call_id);
+    let output = requests[1].function_call_output(call_id);
     assert!(
         !marker.exists(),
-        "approved command should remove marker file"
+        "approved command should remove marker file; tool output: {output:?}"
     );
 
     let hook_inputs = assert_single_permission_request_hook_input(

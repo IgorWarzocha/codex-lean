@@ -1,0 +1,40 @@
+---
+source: core/tests/suite/scenarios_code_mode_settled_helpers_tests.rs
+expression: "context_snapshot::format_request_history_snapshot(\"Settlement helpers deliver fulfilled and rejected records with input indices and map keys.\",\n&requests, &ContextSnapshotOptions::default().rewrite_known_segments(),)"
+---
+Scenario: Settlement helpers deliver fulfilled and rejected records with input indices and map keys.
+
+## Window 1
+-- request 1 (turn) --
+00:additional_tools/developer (3; hash=64828fe09df88d01):
+        - namespace/functions; hash=aadab8ba2199fda8
+          - custom/exec
+          - function/wait
+        - namespace/clock: Read or wait on time; hash=988ad490c20d3305
+          - function/sleep
+        - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
+          - function/followup_task
+          - function/interrupt_agent
+          - function/list_agents
+          - function/send_message
+          - function/spawn_agent
+01:message/developer:
+    <MODEL_INSTRUCTIONS>
+02:message/developer[2]:
+    [01] <PERMISSIONS_INSTRUCTIONS>
+    [02] <collaboration_mode>Execute the request. Prior collaboration-mode instructions replaced. Mode changes only through a developer `<collaboration_mode>` message
+
+        `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
+        </collaboration_mode>
+03:message/developer:
+    <MULTI_AGENT_ROLE>
+04:message/developer:
+    <MULTI_AGENT_MODE>
+05:message/user:
+    <ENVIRONMENT_CONTEXT>
+06:message/user:
+    Collect each completed result, including failures, using the settlement helpers.
+-- request 2 (turn) --
+07:custom_tool_call/exec:for await (const result of as_settled([Promise.resolve("ready")])) text(result);
+    await stream_settled(new Map([["failed", Promise.reject("unavailable")], ["completed", "done"]]), text);
+08:custom_tool_call_output:{"index":0,"status":"fulfilled","value":"ready"} | {"index":"failed","status":"rejected","reason":"unavailable"} | {"index":"completed","status":"fulfilled","value":"done"}

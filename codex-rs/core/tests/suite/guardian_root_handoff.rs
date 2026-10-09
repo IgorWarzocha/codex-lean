@@ -213,6 +213,7 @@ pub(crate) async fn handoff_scenario() -> Result<Vec<ResponsesRequest>> {
         "What is the current throughput?",
     ] {
         test.submit_text_turn(prompt).await?;
+        ThreadIdle::wait(&test.codex).await;
         expected.push(GuardianRootMessage::User(prompt.to_owned()));
     }
     assert_eq!(root_messages(&leaf).await, expected);
@@ -243,6 +244,23 @@ pub(crate) async fn handoff_scenario() -> Result<Vec<ResponsesRequest>> {
         json!({"target":"alpha", "message":"Check."}),
     )
     .await?;
+    // Child RESULT autoresumes leave earlier completions on alpha's event queue.
+    // Observe the reviewed action itself before using its terminal lifecycle barrier.
+    if tokio::time::timeout(Duration::from_secs(10), async {
+        while review.requests().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_err()
+    {
+        let requests = core_test_support::responses::received_responses_requests(&server).await;
+        let outputs = requests
+            .iter()
+            .filter_map(|request| request.function_call_output_text("check"))
+            .collect::<Vec<_>>();
+        anyhow::bail!("worker never requested Guardian review; check outputs: {outputs:?}");
+    }
     wait_for_event(&alpha, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     ThreadIdle::wait(&alpha).await;
     expected.push(GuardianRootMessage::User(

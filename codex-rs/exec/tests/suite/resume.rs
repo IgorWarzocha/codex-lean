@@ -630,6 +630,14 @@ async fn exec_resume_accepts_global_flags_after_subcommand() -> anyhow::Result<(
     test.cmd()
         .arg("resume")
         .arg("--last")
+        .args([
+            "--config",
+            "context_strategy=\"compaction\"",
+            "--config",
+            "features.code_mode={enabled=false,runtime=\"v8\"}",
+            "--config",
+            "features.code_mode_only=false",
+        ])
         .arg("--config")
         .arg(base_config)
         .arg("--json")

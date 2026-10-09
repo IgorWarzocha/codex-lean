@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use codex_core::TurnInputRequest;
-use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::local_requests;
 use std::collections::HashMap;
 
 use codex_features::Feature;
@@ -138,7 +138,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(cwd.abs())),
+                environments: Some(local_requests(cwd.abs())),
                 approval_policy: Some(AskForApproval::Never),
                 sandbox_policy: Some(sandbox_policy),
                 permission_profile,
@@ -278,7 +278,7 @@ async fn request_user_input_interrupt_emits_deferred_token_count() -> anyhow::Re
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(cwd.abs())),
+                environments: Some(local_requests(cwd.abs())),
                 approval_policy: Some(AskForApproval::Never),
                 sandbox_policy: Some(sandbox_policy),
                 permission_profile,
@@ -295,7 +295,7 @@ async fn request_user_input_interrupt_emits_deferred_token_count() -> anyhow::Re
         )
         .await?;
 
-    let request = wait_for_event_match(&codex, |event| match event {
+    let request = wait_for_event_match(codex, |event| match event {
         EventMsg::RequestUserInput(request) => Some(request.clone()),
         _ => None,
     })
@@ -303,7 +303,7 @@ async fn request_user_input_interrupt_emits_deferred_token_count() -> anyhow::Re
 
     codex.submit(Op::Interrupt).await?;
 
-    let token_count = wait_for_event_match(&codex, |event| match event {
+    let token_count = wait_for_event_match(codex, |event| match event {
         EventMsg::TokenCount(token_count) => Some(token_count.clone()),
         _ => None,
     })
@@ -314,7 +314,7 @@ async fn request_user_input_interrupt_emits_deferred_token_count() -> anyhow::Re
             .map(|info| info.total_token_usage.total_tokens),
         Some(77)
     );
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnAborted(_))).await;
+    wait_for_event(codex, |event| matches!(event, EventMsg::TurnAborted(_))).await;
 
     assert_eq!(request.call_id, call_id);
     Ok(())
@@ -386,7 +386,7 @@ where
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(cwd.abs())),
+                environments: Some(local_requests(cwd.abs())),
                 approval_policy: Some(AskForApproval::Never),
                 sandbox_policy: Some(sandbox_policy),
                 permission_profile,

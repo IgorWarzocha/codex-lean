@@ -6,7 +6,7 @@ use crate::Command;
 use crate::ProcessMode;
 
 #[tokio::test]
-async fn path_search_stops_at_invalid_candidates() -> anyhow::Result<()> {
+async fn path_search_matches_compatibility_for_invalid_candidates() -> anyhow::Result<()> {
     let root = tempfile::tempdir()?;
     std::fs::create_dir(root.path().join("bin"))?;
     std::os::unix::fs::symlink("loop", root.path().join("loop"))?;
@@ -17,13 +17,27 @@ async fn path_search_stops_at_invalid_candidates() -> anyhow::Result<()> {
         command
             .current_dir(root.path())
             .env("PATH", format!("{candidate}:bin"));
-        let expected = command
-            .inner
-            .spawn()
-            .expect_err("invalid first candidate must stop lookup");
+        let expected = command.inner.output().await;
         command.process_mode(ProcessMode::NewSession);
-        let actual = command.spawn().err().expect("native lookup must stop too");
-        assert_eq!(actual.raw_os_error(), expected.raw_os_error());
+        // libc/std versions differ on whether these errors stop PATH lookup.
+        // Native spawning must preserve the actual compatibility launch result.
+        match (command.spawn(), expected) {
+            (Ok(child), Ok(expected)) => {
+                let actual = child.wait_with_output().await?;
+                assert_eq!(actual, expected);
+                assert!(actual.status.success());
+                assert_eq!(actual.stdout, b"later");
+            }
+            (Err(actual), Err(expected)) => {
+                assert_eq!(actual.raw_os_error(), expected.raw_os_error());
+            }
+            (Ok(_), Err(expected)) => {
+                panic!("native PATH lookup succeeded while compatibility failed: {expected}");
+            }
+            (Err(actual), Ok(_)) => {
+                panic!("native PATH lookup failed while compatibility succeeded: {actual}");
+            }
+        }
     }
     Ok(())
 }

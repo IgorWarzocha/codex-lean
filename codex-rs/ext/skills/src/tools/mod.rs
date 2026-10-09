@@ -174,9 +174,17 @@ impl SkillAnalytics {
             ),
             vec![SkillInvocation {
                 skill_name: skill.name.clone(),
-                location: if skill.authority.kind == SkillSourceKind::Host {
+                location: if let Some(path) = (skill.authority.kind == SkillSourceKind::Host)
+                    .then(|| {
+                        codex_utils_path_uri::PathUri::from_host_native_path(
+                            skill.main_prompt.as_str(),
+                        )
+                        .ok()
+                    })
+                    .flatten()
+                {
                     SkillInvocationLocation::Host {
-                        path: std::path::PathBuf::from(skill.main_prompt.as_str()),
+                        path,
                         scope: skill
                             .prompt_scope()
                             .unwrap_or(codex_protocol::protocol::SkillScope::User),

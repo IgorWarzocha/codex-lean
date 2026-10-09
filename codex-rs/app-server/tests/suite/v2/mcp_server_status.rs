@@ -702,11 +702,12 @@ async fn mcp_server_status_list_returns_raw_server_and_tool_names(plugin: bool) 
     let codex_home = TempDir::new()?;
     let endpoint = format!("{mcp_server_url}/mcp?secret=not-for-clients");
     let http_config = if plugin {
-        "[features]\nplugins = true\n".to_string()
+        String::new()
     } else {
         format!("[mcp_servers.some-server]\nurl = {endpoint:?}\n")
     };
     mock_responses_config(&server.uri())
+        .enable_feature(codex_features::Feature::Plugins)
         .with_extra_config(&format!(
             "{http_config}[mcp_servers.broken-server]\ncommand = {}",
             toml::Value::String(
@@ -1488,7 +1489,7 @@ async fn start_slow_inventory_mcp_server(tool_name: &str) -> Result<(String, Joi
 fn mock_responses_config(server_uri: &str) -> MockResponsesConfig {
     MockResponsesConfig::new(server_uri)
         .with_root_config("context_strategy = 'compaction'")
-        .with_extra_config("[features.code_mode]\nruntime = 'v8'")
+        .disable_feature(codex_features::Feature::CodeMode)
         .with_root_config("compact_prompt = \"compact\"\nmodel_auto_compact_token_limit = 1024")
         .with_provider_config("supports_websockets = false")
 }

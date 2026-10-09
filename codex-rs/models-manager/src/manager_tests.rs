@@ -66,7 +66,6 @@ fn remote_model_with_visibility(
             "upgrade": null,
             "model_messages": {
                 "instructions_template": "base instructions",
-                "instructions_variables": null,
                 "approvals": null,
                 "auto_review": null,
                 "permissions": null
@@ -766,7 +765,6 @@ async fn default_manager_keeps_compact_baseline_and_catalog_capabilities() {
             let messages = expected.model_messages.get_or_insert_default();
             codex_prompts::apply_default_catalog_workflow(messages);
             messages.instructions_template = Some(model_info::BASE_INSTRUCTIONS.to_string());
-            messages.instructions_variables = None;
             assert_eq!(selected, expected);
         }
     }

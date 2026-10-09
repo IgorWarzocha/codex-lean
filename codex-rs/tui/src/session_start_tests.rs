@@ -45,6 +45,7 @@ async fn archived_session_requires_confirmation_before_resume_or_fork() -> Resul
     ] {
         let codex_home = TempDir::new()?;
         let config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(codex_home.path().to_path_buf())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .build()

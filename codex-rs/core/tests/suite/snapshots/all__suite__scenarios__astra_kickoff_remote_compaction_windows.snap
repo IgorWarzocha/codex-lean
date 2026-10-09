@@ -16,12 +16,10 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=86908c2dc1f29c40):
-        - namespace/functions; hash=19b1a287e17bbf0f
+00:additional_tools/developer (3; hash=ea9f17d10ddaf3c9):
+        - namespace/functions; hash=b352d00241be814a
           - custom/exec
           - function/wait
-          - function/request_user_input
-          - function/request_user_input_async
         - namespace/clock: Read or wait on time; hash=988ad490c20d3305
           - function/sleep
         - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
@@ -57,7 +55,7 @@ Settings:
         </collaboration_mode>
 03:message/developer:
     <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
@@ -133,12 +131,10 @@ Settings:
 ## Window 2 (after request 3: input diverged at item 02)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (3; hash=86908c2dc1f29c40):
-        - namespace/functions; hash=19b1a287e17bbf0f
+00:additional_tools/developer (3; hash=ea9f17d10ddaf3c9):
+        - namespace/functions; hash=b352d00241be814a
           - custom/exec
           - function/wait
-          - function/request_user_input
-          - function/request_user_input_async
         - namespace/clock: Read or wait on time; hash=988ad490c20d3305
           - function/sleep
         - namespace/collaboration: Agent collaboration; hash=940eda70c563c144
@@ -158,10 +154,7 @@ Settings: same as window 1
 
 02:message/user:
     Plan a team kickoff for Friday using $outline and $calendar:agenda.
-03:message/user:
-    Summarize the kickoff notes with $notes:summarize.
-04:compaction:encrypted=true; chars=26; hash=ec5e2724e6f5f641
-05:message/developer[3]:
+03:message/developer[3]:
     [01] Skills: List once at session start; read always-applicable and task-relevant skills before work
     [02] <permissions instructions>
         `sandbox_mode`: `read-only`. Reads only. Network access: restricted
@@ -177,15 +170,15 @@ Settings: same as window 1
 
         `request_user_input`, when available: optional questions that materially improve the work, never approva...ocking safe progress: one concise plain-text question [hash=291e336ce1657280]
         </collaboration_mode>
-06:message/developer:
+04:message/developer:
     <multi_agent_role>Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysi... active agent, no new turn. `followup_task`: new turn [hash=98e3a9369209aed0]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     Active-agent limit, including you: 4
 
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid... parent model and effort inherited</multi_agent_role> [hash=4692806a8a393d2c]
-07:message/developer:
+05:message/developer:
     <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
-08:message/user[2]:
+06:message/user[2]:
     [01] # AGENTS.md instructions for <AGENTS_DIRECTORY>
 
         <INSTRUCTIONS>
@@ -198,6 +191,9 @@ Settings: same as window 1
           <timezone><HOST_TIMEZONE></timezone>
           <filesystem><workspace_roots><root><WORKSPACE_ROOT 1></root></workspace_roots><permission_profile type...ntry></file_system></permission_profile></filesystem> [hash=911722cc43b4c3b8]
         </environment_context>
+07:message/user:
+    Summarize the kickoff notes with $notes:summarize.
+08:compaction:encrypted=true; chars=26; hash=ec5e2724e6f5f641
 09:message/user[2]:
     [01] Check the final kickoff brief and attached sketch with $final-check and $calendar:agenda.
     [02] <input_image:image_url>

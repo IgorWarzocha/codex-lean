@@ -7,7 +7,6 @@ use codex_protocol::openai_models::AutoReviewMessages;
 use codex_protocol::openai_models::CollaborationModeMessages;
 use codex_protocol::openai_models::ConfirmationPolicies;
 use codex_protocol::openai_models::GuardianV2ModelConfig;
-use codex_protocol::openai_models::ModelInstructionsVariables;
 use codex_protocol::openai_models::ModelTokenBudgetConfig;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::MultiAgentMessages;
@@ -101,11 +100,6 @@ fn catalog_resolution_preserves_runtime_messages_and_literal_overrides() {
             ..Default::default()
         }),
         instructions_template: Some("template".to_string()),
-        instructions_variables: Some(ModelInstructionsVariables {
-            personality_default: Some("default".to_string()),
-            personality_friendly: Some("friendly".to_string()),
-            personality_pragmatic: Some("pragmatic".to_string()),
-        }),
         approvals: Some(approvals),
         collaboration_modes: Some(collaboration_modes),
         auto_review: Some(auto_review),
@@ -151,9 +145,6 @@ fn catalog_resolution_preserves_runtime_messages_and_literal_overrides() {
         );
         let mut expected = messages.clone();
         expected.instructions_template = Some(expected_template.to_string());
-        if config.base_instructions.is_some() {
-            expected.instructions_variables = None;
-        }
         assert_eq!(updated.model_messages, Some(expected));
         assert_eq!(render_model_instructions(&updated), expected_template);
     }
@@ -183,11 +174,6 @@ fn personality_none_strips_catalog_instruction_sources_through_the_next_h1() {
     ] {
         let mut messages = ModelMessages {
             instructions_template: Some(instructions.to_string()),
-            instructions_variables: Some(ModelInstructionsVariables {
-                personality_default: Some("default".to_string()),
-                personality_friendly: Some("friendly".to_string()),
-                personality_pragmatic: Some("pragmatic".to_string()),
-            }),
             persistent_instructions: Some(String::new()),
             tools: Some(ToolMessages {
                 send_user_message_async: Some(ToolMessage {

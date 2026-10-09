@@ -7,18 +7,12 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
 ## Window 1
 -- request 1 (request) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:00:00Z</current_time_iso>
@@ -28,9 +22,9 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
     </heartbeat>
 
 -- request 2 (request) --
-05:message/assistant:
+04:message/assistant:
     Recorded this input.
-06:message/user:
+05:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:01:00Z</current_time_iso>
@@ -40,14 +34,14 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
     </heartbeat>
 
 -- request 3 (request) --
-07:message/assistant:
+06:message/assistant:
     Recorded this input.
-08:message/user:
+07:message/user:
     Create a new worktree for the fix; this overrides the monitor's no-worktree restriction.
 -- request 4 (request) --
-09:message/assistant:
+08:message/assistant:
     Recorded this input.
-10:message/user:
+09:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:03:00Z</current_time_iso>
@@ -57,15 +51,15 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
     </heartbeat>
 
 -- request 5 (request) --
-11:message/assistant:
+10:message/assistant:
     Recorded this input.
-12:message/user:
+11:message/user:
     Check the fix in the requested worktree.
 
-## Window 2 (after request 5: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
+## Window 2 (after request 5: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 6 (request) --
-00:additional_tools/developer (1; hash=bcb96c45ea26211d):
-        - namespace/functions; hash=87bed94a1295f82b
+00:additional_tools/developer (1; hash=65138a5ec117f1c5):
+        - namespace/functions; hash=2fb64b4f3e24dcf1
           - custom/exec
           - function/wait
 01:message/developer:
@@ -175,21 +169,15 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
     [29] >>> APPROVAL REQUEST END
 
 
-## Window 3 (after request 6: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
+## Window 3 (after request 6: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 7 (request) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:00:00Z</current_time_iso>
@@ -198,9 +186,9 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
       </instructions>
     </heartbeat>
 
-05:message/assistant:
+04:message/assistant:
     Recorded this input.
-06:message/user:
+05:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:01:00Z</current_time_iso>
@@ -209,13 +197,13 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
       </instructions>
     </heartbeat>
 
-07:message/assistant:
+06:message/assistant:
     Recorded this input.
-08:message/user:
+07:message/user:
     Create a new worktree for the fix; this overrides the monitor's no-worktree restriction.
-09:message/assistant:
+08:message/assistant:
     Recorded this input.
-10:message/user:
+09:message/user:
     <heartbeat>
       <automation_id>monitor</automation_id>
       <current_time_iso>2026-01-01T00:03:00Z</current_time_iso>
@@ -224,9 +212,9 @@ Scenario: Three scheduled runs share one instruction body, a human overrides its
       </instructions>
     </heartbeat>
 
-11:message/assistant:
+10:message/assistant:
     Recorded this input.
-12:message/user:
+11:message/user:
     Check the fix in the requested worktree.
-13:function_call/exec_command:{"cmd":"exit 0","justification":"Check the explicitly requested change.","sandbox_permissions":"require_escalated"}
-14:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=1920af4a5ed341ad]
+12:function_call/exec_command:{"cmd":"exit 0","justification":"Check the explicitly requested change.","sandbox_permissions":"require_escalated"}
+13:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=1920af4a5ed341ad]

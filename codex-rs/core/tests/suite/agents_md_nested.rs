@@ -30,10 +30,19 @@ fn configure_runtime(config: &mut codex_core::config::Config, runtime: Option<Co
                 .map(Into::into)
                 .unwrap_or_else(|| "deno".into()),
         );
-        config.features.enable(Feature::CodeModeOnly).unwrap();
+        config
+            .features
+            .enable(Feature::CodeModeOnly)
+            .expect("configure test feature flags");
     } else {
-        config.features.disable(Feature::CodeModeOnly).unwrap();
-        config.features.disable(Feature::CodeMode).unwrap();
+        config
+            .features
+            .disable(Feature::CodeModeOnly)
+            .expect("configure test feature flags");
+        config
+            .features
+            .disable(Feature::CodeMode)
+            .expect("configure test feature flags");
     }
 }
 

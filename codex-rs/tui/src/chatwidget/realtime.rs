@@ -721,7 +721,7 @@ impl ChatWidget {
         let remaining = MAX_PUBLIC_PROGRESS_BYTES.saturating_sub(stream.text.len());
         stream
             .text
-            .push_str(&codex_utils_string::take_bytes_at_char_boundary(
+            .push_str(codex_utils_string::take_bytes_at_char_boundary(
                 delta, remaining,
             ));
         let tail = &stream.text[stream.sent_bytes..];

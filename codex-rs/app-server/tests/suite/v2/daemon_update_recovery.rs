@@ -752,7 +752,7 @@ async fn managed_shutdown_records_interrupted_turn(outcome: &str) -> Result<()> 
         .next()
         .context("collaboration instructions")?;
     assert_eq!(
-        collaboration.contains("# Plan Mode"),
+        collaboration.contains("Planning only until a developer mode change"),
         mode == "plan",
         "{input}"
     );

@@ -223,6 +223,7 @@ async fn test_with_host_control(
     let test = test_codex()
         .with_direct_tools()
         .with_config(|config| {
+            config.multi_agent_v2.wait_agent_enabled = true;
             for feature in [
                 Feature::Collab,
                 Feature::MultiAgentV2,
@@ -263,7 +264,7 @@ async fn host_threads_preserve_lineage_settings_and_resume_routing() -> anyhow::
         .thread_manager
         .start_thread(StartThreadOptions {
             reserved_thread_id: Some(ThreadId::new()),
-            environments: Some(vec![test.executor_environment().selection().clone()]),
+            environments: Some(vec![test.executor_environment().request()]),
             session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id: root_id,
                 depth: 1,
@@ -348,7 +349,7 @@ async fn host_threads_preserve_lineage_settings_and_resume_routing() -> anyhow::
             .thread_manager
             .start_thread(StartThreadOptions {
                 reserved_thread_id: Some(reserved_thread_id),
-                environments: Some(vec![test.executor_environment().selection().clone()]),
+                environments: Some(vec![test.executor_environment().request()]),
                 ..StartThreadOptions::new(child_config.clone())
             })
             .await;
@@ -407,7 +408,7 @@ async fn host_factory_follows_thread_lifecycle() -> anyhow::Result<()> {
     let root_id = test.session_configured.thread_id;
     let manager = &test.thread_manager;
     let options = || StartThreadOptions {
-        environments: Some(vec![test.executor_environment().selection().clone()]),
+        environments: Some(vec![test.executor_environment().request()]),
         ..StartThreadOptions::new(test.config.clone())
     };
     let internal = manager

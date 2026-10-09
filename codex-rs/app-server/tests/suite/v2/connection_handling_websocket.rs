@@ -947,10 +947,15 @@ pub(super) fn create_config_toml(
         format!(
             r#"
 model = "mock-model"
+context_strategy = "compaction"
 approval_policy = "{approval_policy}"
 sandbox_mode = "read-only"
 
 model_provider = "mock_provider"
+
+[features.code_mode]
+enabled = false
+runtime = "v8"
 
 [model_providers.mock_provider]
 name = "Mock provider for test"

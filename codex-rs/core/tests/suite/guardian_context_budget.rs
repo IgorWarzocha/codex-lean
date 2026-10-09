@@ -265,10 +265,16 @@ async fn review_respects_complete_context_budget(
             model.auto_review_model_override = Some("gpt-5.6-luna".to_owned());
         })
         .with_config(move |config| {
-            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            let base_url = config
+                .model_provider
+                .base_url
+                .as_ref()
+                .expect("mock provider has a base URL");
             config.model_provider.base_url = Some(format!(
                 "{}/backend-api/codex",
-                base_url.strip_suffix("/v1").unwrap()
+                base_url
+                    .strip_suffix("/v1")
+                    .expect("mock provider URL ends in /v1")
             ));
             config
                 .features
@@ -463,6 +469,16 @@ async fn review_respects_complete_context_budget(
             "expected required-evidence budget rejection: {output}"
         );
     } else {
+        if matches!(
+            reviewer_response,
+            ReviewerResponse::UncompactableContinuation | ReviewerResponse::CompactionError
+        ) {
+            assert_eq!(
+                compact_requests.len(),
+                1,
+                "the inspection output must exhaust the slim reviewer's window before testing failed compaction"
+            );
+        }
         let recovered = matches!(
             reviewer_response,
             ReviewerResponse::ToolContinuation | ReviewerResponse::FileImageContinuation
@@ -473,13 +489,16 @@ async fn review_respects_complete_context_budget(
             assert_eq!(compact_requests.len(), 1);
             let compact = &compact_requests[0];
             if matches!(reviewer_response, ReviewerResponse::FileImageContinuation) {
-                assert_eq!(
-                    image_store
-                        .uploads
-                        .lock()
-                        .expect("image upload tracker lock is not poisoned")
-                        .len(),
-                    1
+                let uploads = image_store
+                    .uploads
+                    .lock()
+                    .expect("image upload tracker lock is not poisoned");
+                let [upload] = uploads.as_slice() else {
+                    panic!("persistent Guardian should upload one image");
+                };
+                assert!(
+                    !upload.ephemeral,
+                    "persistent Guardian should request durable attachment storage"
                 );
                 // Compaction input uses the endpoint's budget, not the reviewer's window.
                 assert_eq!(

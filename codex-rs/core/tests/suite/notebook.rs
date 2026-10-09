@@ -53,7 +53,10 @@ async fn codex_app_json_reply_is_filterable_in_notebook_with_native_dispatch() -
         ],
     )
     .await;
-    let mut test = test_codex().build_with_auto_env(&server).await?;
+    let mut test = test_codex()
+        .with_lean_tool_defaults()
+        .build_with_auto_env(&server)
+        .await?;
     let fixture: Value = serde_json::from_str(include_str!("../../assets/tools/codex_app.json"))?;
     let namespace: DynamicToolNamespaceSpec = serde_json::from_value(fixture["namespace"].clone())?;
     test.codex.shutdown_and_wait().await?;
@@ -61,7 +64,7 @@ async fn codex_app_json_reply_is_filterable_in_notebook_with_native_dispatch() -
         .thread_manager
         .start_thread(StartThreadOptions {
             dynamic_tools: vec![DynamicToolSpec::Namespace(namespace)],
-            environments: Some(vec![test.executor_environment().selection().clone()]),
+            environments: Some(vec![test.executor_environment().request()]),
             ..StartThreadOptions::new(test.config.clone())
         })
         .await?;
@@ -139,7 +142,10 @@ async fn default_notebook_rejects_sandboxed_sampling_before_provider_request() -
         .expect(0)
         .mount(&server)
         .await;
-    let test = test_codex().build_with_auto_env(&server).await?;
+    let test = test_codex()
+        .with_lean_tool_defaults()
+        .build_with_auto_env(&server)
+        .await?;
     assert!(test.config.features.enabled(Feature::CodeMode));
     assert_eq!(test.config.code_mode.runtime, CodeModeRuntime::Notebook);
     test.codex
@@ -195,6 +201,7 @@ async fn default_notebook_emits_native_view_image_result() -> Result<()> {
     )
     .await;
     let test = test_codex()
+        .with_lean_tool_defaults()
         .with_config(|config| {
             config.code_mode.deno_program = std::env::var_os("DENO_PROGRAM").map(Into::into);
         })
@@ -237,9 +244,13 @@ async fn disabled_code_mode_does_not_acquire_default_notebook(
     let server = start_mock_server().await;
     let mock = mount_sse_sequence(&server, vec![sse(vec![ev_completed("done")])]).await;
     let test = test_codex()
+        .with_lean_tool_defaults()
         .with_model_info_override("gpt-5.4", |model| model.tool_mode = Some(ToolMode::Direct))
         .with_config(|config| {
-            config.features.disable(Feature::CodeMode).unwrap();
+            config
+                .features
+                .disable(Feature::CodeMode)
+                .expect("configure test feature flags");
             config.code_mode.deno_program = Some("/nonexistent/default-notebook-deno".into());
         })
         .build_with_auto_env(&server)
@@ -279,6 +290,7 @@ async fn direct_model_transition_revokes_live_notebook_without_running_disposers
         sse(vec![ev_assistant_message("ready", "Ready."), ev_completed("ready")]),
     ]).await;
     let test = test_codex()
+        .with_lean_tool_defaults()
         .with_model_info_override("gpt-5.2", |model| model.tool_mode = Some(ToolMode::Direct))
         .with_model_info_override("gpt-5.4", |model| {
             model.tool_mode = Some(ToolMode::CodeMode)
@@ -384,6 +396,7 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
     .await;
     let backend_url = format!("{}/backend-api/codex", server.uri());
     let test = test_codex()
+        .with_lean_tool_defaults()
         .with_context_strategy(ContextStrategy::Notes)
         .with_auth(CodexAuth::from_external_chatgpt_tokens(
             "header.e30.signature",
@@ -421,10 +434,13 @@ text({value: globalThis.retainedNotebookBinding, rejected, status: (await tools.
             1
         );
         assert!(
-            !request
+            request
                 .message_input_texts("developer")
                 .join("\n")
-                .contains("<exec_tools>")
+                .matches("<exec_tools>")
+                .count()
+                == 1,
+            "Notebook guidance is one developer-message prefix, never a second catalog"
         );
         let body = request.body_json();
         let exec = body["tools"]
@@ -485,6 +501,7 @@ text(commandResult.output);"#,
     )
     .await;
     let test = test_codex()
+        .with_lean_tool_defaults()
         .with_config(move |config| {
             config.code_mode.runtime = CodeModeRuntime::Notebook;
             config.code_mode.deno_program = Some(
@@ -494,7 +511,10 @@ text(commandResult.output);"#,
             );
             config.code_mode.notebook_plain_command_output = plain;
             config.ephemeral = true;
-            config.features.enable(Feature::CodeModeOnly).unwrap();
+            config
+                .features
+                .enable(Feature::CodeModeOnly)
+                .expect("configure test feature flags");
         })
         .build(&server)
         .await?;
@@ -504,9 +524,13 @@ text(commandResult.output);"#,
     let result = requests[1].custom_tool_call_output("command-output");
     let items = result["output"].as_array().expect("three text emissions");
     assert_eq!(items.len(), 3, "{result}");
-    let projected = items[0]["text"].as_str().unwrap();
+    let projected = items[0]["text"]
+        .as_str()
+        .expect("tool output contains text");
     let projected_metadata: serde_json::Value = serde_json::from_str(if plain {
-        let (metadata, output) = projected.split_once("\nOutput:\n").unwrap();
+        let (metadata, output) = projected
+            .split_once("\nOutput:\n")
+            .expect("projected output contains an Output separator");
         assert_eq!(output, "first\nsecond\n");
         metadata
     } else {
@@ -519,7 +543,11 @@ text(commandResult.output);"#,
     if !plain {
         assert_eq!(projected_metadata["output"], "first\nsecond\n");
     }
-    let raw: serde_json::Value = serde_json::from_str(items[1]["text"].as_str().unwrap())?;
+    let raw: serde_json::Value = serde_json::from_str(
+        items[1]["text"]
+            .as_str()
+            .expect("tool output contains text"),
+    )?;
     assert_eq!(raw["exit_code"], 7);
     assert_eq!(raw["output"], "first\nsecond\n");
     assert!(raw.get("chunk_id").is_some(), "{raw}");

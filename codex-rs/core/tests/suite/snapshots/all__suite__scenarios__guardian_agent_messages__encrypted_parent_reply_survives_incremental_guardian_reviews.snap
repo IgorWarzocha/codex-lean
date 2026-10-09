@@ -7,28 +7,22 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
 ## Window 1
 -- request 1 (turn) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     Check the change after the parent confirms the exact action.
 -- request 2 (turn) --
-05:message/assistant:
+04:message/assistant:
     I will wait for the parent reply before checking the change.
-06:agent_message
+05:agent_message
 
-## Window 2 (after request 2: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
+## Window 2 (after request 2: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 3 (turn) --
-00:additional_tools/developer (1; hash=bcb96c45ea26211d):
-        - namespace/functions; hash=87bed94a1295f82b
+00:additional_tools/developer (1; hash=65138a5ec117f1c5):
+        - namespace/functions; hash=2fb64b4f3e24dcf1
           - custom/exec
           - function/wait
 01:message/developer:
@@ -97,32 +91,26 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
     [12] >>> APPROVAL REQUEST END
 
 
-## Window 3 (after request 3: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
+## Window 3 (after request 3: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 4 (turn) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     Check the change after the parent confirms the exact action.
-05:message/assistant:
+04:message/assistant:
     I will wait for the parent reply before checking the change.
-06:agent_message
-07:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
-08:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
+05:agent_message
+06:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
+07:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
 
-## Window 4 (after request 4: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
+## Window 4 (after request 4: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 5 (turn) --
-00:additional_tools/developer (1; hash=bcb96c45ea26211d):
-        - namespace/functions; hash=87bed94a1295f82b
+00:additional_tools/developer (1; hash=65138a5ec117f1c5):
+        - namespace/functions; hash=2fb64b4f3e24dcf1
           - custom/exec
           - function/wait
 01:message/developer:
@@ -236,26 +224,20 @@ Scenario: An encrypted parent reply is delivered as a native agent message. Both
     [15] >>> APPROVAL REQUEST END
 
 
-## Window 5 (after request 5: input diverged at item 00, settings changed (instructions, model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
+## Window 5 (after request 5: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 6 (turn) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     Check the change after the parent confirms the exact action.
-05:message/assistant:
+04:message/assistant:
     I will wait for the parent reply before checking the change.
-06:agent_message
-07:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
-08:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
-09:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
-10:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
+05:agent_message
+06:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
+07:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]
+08:function_call/exec_command:{"cmd":"exit 0","justification":"Check the requested change.","sandbox_permissions":"require_escalated"}
+09:function_call_output:exec_command failed: CreateProcess { message: "Rejected(\\"This action was rejected due to unacceptable r...e risk. Otherwise, stop and request user input.\\")" } [hash=ae05158f838e6b05]

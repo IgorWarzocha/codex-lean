@@ -7,7 +7,6 @@ Scenario: A subagent waits for an MCP browser sign-in prompt, then receives the 
 ## Window 1
 Settings:
   include: ["reasoning.encrypted_content"]
-  instructions: <MODEL_INSTRUCTIONS>
   model: "gpt-5.5"
   parallel_tool_calls: true
   prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
@@ -16,25 +15,26 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=942cd10eec88bf1f):
+  tools (9; hash=5d77c01b90af5bab):
     - function/exec_command: Run a shell command; output and session ID while running; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=d19c77fa2b71f970
     - function/write_stdin: Write stdin or poll a running command for output; args=[chars, max_output_tokens, session_id, yield_time_ms]; hash=a4f2b7cc01e55d69
     - function/list_mcp_resources: List MCP context resources; args=[cursor, server]; hash=cbd44f9c01ad2f7d
     - function/list_mcp_resource_templates: List parameterized MCP context resources; args=[cursor, server]; hash=be3e31beca407a4f
     - function/read_mcp_resource: Read an MCP context resource; args=[server, uri]; hash=86a11d96e52cf5d8
-    - function/request_user_input: Ask the user; wait for answers; Plan mode only; args=[questions]; hash=8aa27f4c74227619
     - custom/apply_patch: Edit files with a raw patch, not JSON; hash=91144c5cd42260e0
     - function/view_image: Inspect a local image; args=[detail, path]; hash=c5b0e38afa157cd4
     - tool_search: BM25 search of deferred tool metadata; matches callable on next model call  Enabled sources: - el...; args=[limit, query]; hash=1a2782c71e6298ee
     - web_search; hash=f103e327c6870a46
 -- request 1 (turn) --
 00:message/developer:
+    <MODEL_INSTRUCTIONS>
+01:message/developer:
     <PERMISSIONS_INSTRUCTIONS>
-01:message/user:
-    <ENVIRONMENT_CONTEXT>
 02:message/user:
+    <ENVIRONMENT_CONTEXT>
+03:message/user:
     Run the input tool.
 -- request 2 (turn) --
-03:function_call/mcp__elicitation.request_input:{}
-04:function_call_output:Wall time: <DURATION> seconds
+04:function_call/mcp__elicitation.request_input:{}
+05:function_call_output:Wall time: <DURATION> seconds
     Output: | {"action": "accept", "content": {}}

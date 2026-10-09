@@ -96,6 +96,7 @@ async fn browser_login_bootstraps_through_system_proxy() -> Result<()> {
     let model_catalog_path = codex_home.path().join("models.json");
     std::fs::write(&model_catalog_path, serde_json::to_vec(&model_catalog)?)?;
     MockResponsesConfig::new(&provider.uri())
+        .disable_feature(codex_features::Feature::CodeMode)
         .with_model(&model_catalog.models[0].slug)
         .with_provider_base_url(&format!(
             "{}/v1",
@@ -285,7 +286,12 @@ async fn browser_login_bootstraps_through_system_proxy() -> Result<()> {
                 && let ServerNotification::TurnCompleted(completed) = notification.as_ref()
                 && completed.thread_id == started.thread.id
             {
-                assert_eq!(completed.turn.status, TurnStatus::Completed);
+                assert_eq!(
+                    completed.turn.status,
+                    TurnStatus::Completed,
+                    "proxy turn failed: {:?}",
+                    completed.turn
+                );
                 return anyhow::Ok(());
             }
         }

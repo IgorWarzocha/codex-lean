@@ -53,5 +53,8 @@ shlex = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
+codex-code-mode-protocol = { workspace = true }
 codex-http-client = { workspace = true }
+codex-tools = { workspace = true }
 pretty_assertions = { workspace = true }
+test-case = "3.3.1"

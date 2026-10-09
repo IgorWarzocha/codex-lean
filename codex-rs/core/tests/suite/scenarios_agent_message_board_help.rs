@@ -77,9 +77,18 @@ async fn exercise_help(mode: ToolMode) -> anyhow::Result<()> {
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| "deno".into()),
             );
-            config.features.disable(Feature::CodeMode).unwrap();
-            config.features.disable(Feature::CodeModeOnly).unwrap();
-            config.features.disable(Feature::CodeModePrewarm).unwrap();
+            config
+                .features
+                .disable(Feature::CodeMode)
+                .expect("configure test feature flags");
+            config
+                .features
+                .disable(Feature::CodeModeOnly)
+                .expect("configure test feature flags");
+            config
+                .features
+                .disable(Feature::CodeModePrewarm)
+                .expect("configure test feature flags");
         })
         .with_model_info_override("gpt-5.5", move |model| {
             model.tool_mode = Some(mode);

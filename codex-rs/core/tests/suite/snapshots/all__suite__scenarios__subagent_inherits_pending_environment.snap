@@ -6,12 +6,21 @@ Scenario: A parent spawns a child before the selected environment is configured.
 
 ## Window 1
 -- request 1 (request; parent delegates while the environment is starting) --
-00:message/developer[2]:
+00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <ENVIRONMENTS_INSTRUCTIONS>
-01:message/developer:
+02:message/developer:
     Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     `wait_agent`: waits of minutes preferred over busy polling
 
     Active-agent limit, including you: 4
@@ -19,9 +28,9 @@ Scenario: A parent spawns a child before the selected environment is configured.
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 
     In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...on. Use `followup_task` to start work for idle agents [hash=f2bea39efb3d479b]
-02:message/developer:
+03:message/developer:
     <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
-03:message/user:
+04:message/user:
     <environment_context>
       <environments>
         <environment id="<ENVIRONMENT>">
@@ -32,20 +41,29 @@ Scenario: A parent spawns a child before the selected environment is configured.
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
     </environment_context>
-04:message/user:
+05:message/user:
     Delegate waiting for the shared workspace, and report what the worker finds.
 -- request 2 (request; parent waits for the worker) --
-05:function_call/collaboration.spawn_agent:{"fork_turns":"none","message":"Wait for the shared workspace to become ready.","task_name":"worker"}
-06:function_call_output:{"task_name":"/root/worker"}
+06:function_call/collaboration.spawn_agent:{"fork_turns":"none","message":"Wait for the shared workspace to become ready.","task_name":"worker"}
+07:function_call_output:{"task_name":"/root/worker"}
 
-## Window 2 (after request 2: input diverged at item 01, settings changed (tools))
+## Window 2 (after request 2: input diverged at item 02, settings changed (tools))
 -- request 3 (request; child sees the inherited starting environment) --
-00:message/developer[2]:
+00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <ENVIRONMENTS_INSTRUCTIONS>
-01:message/developer:
+02:message/developer:
     Complete the assigned task. Final answer to parent. Agent messages in analysis. `send_message`: contact an active agent, no new turn. `followup_task`: new turn
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     `wait_agent`: waits of minutes preferred over busy polling
 
     Active-agent limit, including you: 4
@@ -53,9 +71,9 @@ Scenario: A parent spawns a child before the selected environment is configured.
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 
     In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a.... Board posts do not assign work or wake idle agents. [hash=8aa9ab603287bfa9]
-02:message/developer:
+03:message/developer:
     <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
-03:message/user:
+04:message/user:
     <environment_context>
       <environments>
         <environment id="<ENVIRONMENT>">
@@ -66,40 +84,11 @@ Scenario: A parent spawns a child before the selected environment is configured.
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
     </environment_context>
-04:agent_message
-
-## Window 3 (after request 3: settings changed (tools))
+05:agent_message
 -- request 4 (request; child receives the ready result and updated environment) --
-00:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <ENVIRONMENTS_INSTRUCTIONS>
-01:message/developer:
-    Complete the assigned task. Final answer to parent. Agent messages in analysis. `send_message`: contact an active agent, no new turn. `followup_task`: new turn
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    `wait_agent`: waits of minutes preferred over busy polling
-
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-
-    In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a.... Board posts do not assign work or wake idle agents. [hash=8aa9ab603287bfa9]
-02:message/developer:
-    <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
-03:message/user:
-    <environment_context>
-      <environments>
-        <environment id="<ENVIRONMENT>">
-          <cwd><CWD></cwd>
-          <status>starting</status>
-        </environment>
-      </environments>
-      <current_date><CURRENT_DATE></current_date>
-      <timezone><HOST_TIMEZONE></timezone>
-    </environment_context>
-04:agent_message
-05:function_call/functions.wait_for_environment:{"environment_id":"<ENVIRONMENT>"}
-06:function_call_output:{"environment_id":"<ENVIRONMENT>","status":"ready"}
-07:message/user:
+06:function_call/functions.wait_for_environment:{"environment_id":"<ENVIRONMENT>"}
+07:function_call_output:{"environment_id":"<ENVIRONMENT>","status":"ready"}
+08:message/user:
     <environment_context>
       <cwd><CWD></cwd>
       <shell><HOST_SHELL></shell>
@@ -108,14 +97,23 @@ Scenario: A parent spawns a child before the selected environment is configured.
       <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=e8c1de60307d0a3d]
     </environment_context>
 
-## Window 4 (after request 4: input diverged at item 01, settings changed (tools))
+## Window 3 (after request 4: input diverged at item 02, settings changed (tools))
 -- request 5 (request; parent receives the child result) --
-00:message/developer[2]:
+00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer[2]:
     [01] <PERMISSIONS_INSTRUCTIONS>
     [02] <ENVIRONMENTS_INSTRUCTIONS>
-01:message/developer:
+02:message/developer:
     Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
+    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
     `wait_agent`: waits of minutes preferred over busy polling
 
     Active-agent limit, including you: 4
@@ -123,9 +121,9 @@ Scenario: A parent spawns a child before the selected environment is configured.
     `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
 
     In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...on. Use `followup_task` to start work for idle agents [hash=f2bea39efb3d479b]
-02:message/developer:
+03:message/developer:
     <multi_agent_mode>Proactive-delegation guidance replaced. Agent spawning only on explicit request from t...le AGENTS.md or skill instructions</multi_agent_mode> [hash=2474ee6b5769b670]
-03:message/user:
+04:message/user:
     <environment_context>
       <environments>
         <environment id="<ENVIRONMENT>">
@@ -136,14 +134,14 @@ Scenario: A parent spawns a child before the selected environment is configured.
       <current_date><CURRENT_DATE></current_date>
       <timezone><HOST_TIMEZONE></timezone>
     </environment_context>
-04:message/user:
+05:message/user:
     Delegate waiting for the shared workspace, and report what the worker finds.
-05:function_call/collaboration.spawn_agent:{"fork_turns":"none","message":"Wait for the shared workspace to become ready.","task_name":"worker"}
-06:function_call_output:{"task_name":"/root/worker"}
-07:function_call/collaboration.wait_agent:{"timeout_ms":10000}
-08:function_call_output:{"message":"Wait completed.","timed_out":false}
-09:agent_message
-10:message/user:
+06:function_call/collaboration.spawn_agent:{"fork_turns":"none","message":"Wait for the shared workspace to become ready.","task_name":"worker"}
+07:function_call_output:{"task_name":"/root/worker"}
+08:function_call/collaboration.wait_agent:{"timeout_ms":10000}
+09:function_call_output:{"message":"Wait completed.","timed_out":false}
+10:agent_message
+11:message/user:
     <environment_context>
       <cwd><CWD></cwd>
       <shell><HOST_SHELL></shell>

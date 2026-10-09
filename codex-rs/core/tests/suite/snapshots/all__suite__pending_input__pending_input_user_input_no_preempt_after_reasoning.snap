@@ -7,26 +7,18 @@ Scenario: /responses POST bodies with pending input
 ## Window 1
 -- request 1 (request; First request) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory....less stopped or shut down. Do not poll for completion [hash=76b09020695c57df]
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-
-    In authorized substantial multi-agent workflows, use `agent_board` for shared decisions, dependencies, a...on. Use `followup_task` to start work for idle agents [hash=f2bea39efb3d479b]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     first prompt
 -- request 2 (request; Second request) --
-05:reasoning:summary=thinking:encrypted=true
-06:function_call/shell:{"command":"echo preserved tool call"}
-07:message/assistant:
+04:reasoning:summary=thinking:encrypted=true
+05:function_call/shell:{"command":"echo preserved tool call"}
+06:message/assistant:
     first answer
-08:function_call_output:unsupported call: shell
-09:message/user:
+07:function_call_output:unsupported call: shell
+08:message/user:
     second prompt

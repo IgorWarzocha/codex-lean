@@ -41,7 +41,7 @@ impl HostSkillsSnapshot {
         &self,
         skill: &SkillMetadata,
     ) -> io::Result<Vec<(String, PathUri)>> {
-        let main = PathUri::from_abs_path(&skill.path_to_skills_md);
+        let main = &skill.path_to_skills_md;
         let root = main
             .parent()
             .ok_or_else(|| io::Error::other("skill has no package directory"))?;

@@ -38,6 +38,7 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
     app.config.codex_home = client_home.path().to_path_buf().abs();
     app.config.sqlite = codex_state::SqliteConfig::new_for_testing(client_home.path().abs());
     let server_config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(server_home.path().to_path_buf())
         .harness_overrides(ConfigOverrides {
             cwd: Some(remote_cwd.to_path_buf()),

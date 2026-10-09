@@ -180,7 +180,9 @@ mod tests {
     use super::*;
     use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
     use codex_config::cli_settings::CliSetting;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
+    use crossterm::event::KeyModifiers;
 
     #[tokio::test]
     async fn settings_selection_saves_defaults_without_mutating_thread_or_emitting_ops() {

@@ -14,6 +14,7 @@ use codex_protocol::protocol::InternalSessionSource;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use core_test_support::ThreadIdle;
 use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_completed;
@@ -64,11 +65,14 @@ async fn first_request_guidance_tracks_actual_board_availability(
     let mock = responses::mount_sse_sequence(&server, vec![done(), done()]).await;
     let test = test_codex()
         .with_config(move |config| {
-            super::super::configure_scenario_catalog(config);
+            super::configure(config);
             assert!(config.features.enabled(Feature::AgentMessageBoard));
             match availability {
                 Availability::Disabled => {
-                    config.features.disable(Feature::AgentMessageBoard).unwrap();
+                    config
+                        .features
+                        .disable(Feature::AgentMessageBoard)
+                        .expect("configure test feature flags");
                 }
                 Availability::Ephemeral => config.ephemeral = true,
                 Availability::FailedStartup => {
@@ -81,7 +85,10 @@ async fn first_request_guidance_tracks_actual_board_availability(
                         });
                 }
                 Availability::V1 => {
-                    config.features.disable(Feature::MultiAgentV2).unwrap();
+                    config
+                        .features
+                        .disable(Feature::MultiAgentV2)
+                        .expect("configure test feature flags");
                 }
                 Availability::BoardOnly => config.multi_agent_v2.disable_direct_message = true,
                 Availability::Default | Availability::Internal => {}
@@ -161,19 +168,22 @@ async fn available_board_preserves_role_override_semantics(
     let mock = responses::mount_sse_once(&server, done()).await;
     let test = test_codex()
         .with_config(move |config| {
-            super::super::configure_scenario_catalog(config);
+            super::configure(config);
             config.multi_agent_v2.root_agent_usage_hint_text = configured.map(str::to_owned);
         })
         .with_model_info_override("gpt-5.4", move |model| {
             if empty_catalog {
-                model.model_messages.as_mut().unwrap().multi_agent =
-                    Some(codex_protocol::openai_models::MultiAgentMessages {
-                        role: Some(codex_protocol::openai_models::MultiAgentRoleMessages {
-                            root: Some(String::new()),
-                            subagent: None,
-                        }),
-                        mode: None,
-                    });
+                model
+                    .model_messages
+                    .as_mut()
+                    .expect("fixture model contains model messages")
+                    .multi_agent = Some(codex_protocol::openai_models::MultiAgentMessages {
+                    role: Some(codex_protocol::openai_models::MultiAgentRoleMessages {
+                        root: Some(String::new()),
+                        subagent: None,
+                    }),
+                    mode: None,
+                });
             }
         })
         .build_with_auto_env(&server)
@@ -207,7 +217,7 @@ async fn board_guidance_has_exact_bounded_prompt_cost() -> anyhow::Result<()> {
         let mock = responses::mount_sse_once(&server, done()).await;
         let test = test_codex()
             .with_config(move |config| {
-                super::super::configure_scenario_catalog(config);
+                super::configure(config);
                 if !enabled {
                     config.features.disable(Feature::AgentMessageBoard).unwrap();
                 }
@@ -243,12 +253,46 @@ async fn board_guidance_has_exact_bounded_prompt_cost() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spawned_child_receives_board_and_guidance_once(fork_turns: &str) -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+    extensions.thread_lifecycle_contributor(std::sync::Arc::new(ThreadIdle));
     let test = test_codex()
+        .with_extensions(std::sync::Arc::new(extensions.build()))
         .with_config(|config| {
-            super::super::configure_scenario_catalog(config);
+            super::configure(config);
+            // This scenario calls the nested exec facade, unlike the direct board fixtures.
+            config
+                .features
+                .enable(Feature::CodeMode)
+                .expect("configure test feature flags");
+        })
+        .with_model_info_override("gpt-5.5", |model| {
+            model.multi_agent_version = Some(codex_protocol::protocol::MultiAgentVersion::V2);
         })
         .build_with_auto_env(&server)
         .await?;
+    // Child terminal results legitimately resume the parent; board notices do not.
+    // Keep that extra root turn out of the four-step board/guidance choreography.
+    wiremock::Mock::given(wiremock::matchers::header(
+        "thread-id",
+        test.session_configured.thread_id.to_string(),
+    ))
+    .and(|request: &wiremock::Request| {
+        request
+            .body_json::<Value>()
+            .expect("parent completion request")["input"]
+            .as_array()
+            .expect("input")
+            .iter()
+            .any(|item| item["type"] == "agent_message")
+    })
+    .respond_with(
+        wiremock::ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string(done()),
+    )
+    .with_priority(10)
+    .mount(&server)
+    .await;
     let mock = responses::mount_sse_sequence(&server, vec![
         sse(vec![ev_custom_tool_call("create-design", "exec", r#"text(await tools.collaboration__agent_board({action: 'create_channel', channel_name: 'design'}))"#), ev_completed("create-design")]),
         tool("spawn-worker", "spawn_agent", json!({
@@ -267,6 +311,17 @@ async fn spawned_child_receives_board_and_guidance_once(fork_turns: &str) -> any
         .context("spawned child")?;
     let child = test.thread_manager.get_thread(child_id).await?;
     wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    ThreadIdle::wait(&child).await;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while !matches!(
+            test.codex.agent_status().await,
+            codex_protocol::protocol::AgentStatus::Completed(_)
+        ) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .context("parent completion autoresume should finish")?;
     let requests = mock.requests();
     assert_eq!(requests.len(), 4);
     let child_request = requests
@@ -299,22 +354,30 @@ async fn spawned_child_receives_board_and_guidance_once(fork_turns: &str) -> any
         child_request.body_contains_text("Read the design channel and update relevant threads.")
     );
     // Prove the fresh child sees the parent's board, not merely another tool with the same name.
-    let read = responses::mount_sse_sequence(
+    let read_start = responses::received_responses_requests(&server).await.len();
+    super::mount_thread_sequence(
         &server,
+        child_id,
         vec![
             sse(vec![ev_custom_tool_call("child-read", "exec", r#"text(await tools.collaboration__agent_board({action: 'get_channels', query: 'design'}))"#), ev_completed("child-read")]),
             done(),
         ],
     )
     .await;
-    child
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Read the design channel.".to_string(),
-            text_elements: vec![],
-        }]))
-        .await?;
-    wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    let next = read.requests();
+    let turn_id = super::start_board_turn(&child, "Read the design channel.").await?;
+    wait_for_event(
+        &child,
+        |event| matches!(event, EventMsg::TurnComplete(event) if event.turn_id == turn_id),
+    )
+    .await;
+    ThreadIdle::wait(&child).await;
+    let next = responses::received_responses_requests(&server)
+        .await
+        .into_iter()
+        .skip(read_start)
+        .filter(|request| request.header("thread-id") == Some(child_id.to_string()))
+        .collect::<Vec<_>>();
+    assert_eq!(next.len(), 2);
     let (output, success) = next[1]
         .custom_tool_call_output_content_and_success("child-read")
         .context("shared channel result")?;
@@ -333,5 +396,7 @@ async fn spawned_child_receives_board_and_guidance_once(fork_turns: &str) -> any
             .count(),
         1
     );
+    child.shutdown_and_wait().await?;
+    test.codex.shutdown_and_wait().await?;
     Ok(())
 }

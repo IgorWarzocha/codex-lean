@@ -63,6 +63,7 @@ fn assert_request_service_tier(request: &ResponseMock, expected: Option<&str>) {
 }
 
 fn configure_priority_role(config: &mut Config) {
+    config.multi_agent_v2.wait_agent_enabled = true;
     for feature in [Feature::Collab, Feature::MultiAgentV2] {
         config
             .features
@@ -136,7 +137,10 @@ async fn mount_completed_child(
     mount_sse_once_match(
         server,
         move |request: &wiremock::Request| {
-            body_contains(request, prompt) && !body_contains(request, root_prompt)
+            request.headers.contains_key("x-openai-subagent")
+                && body_contains(request, prompt)
+                && !body_contains(request, root_prompt)
+                && (prompt == FOLLOWUP_PROMPT || !body_contains(request, FOLLOWUP_PROMPT))
         },
         sse(vec![
             ev_response_created(prompt),
@@ -307,6 +311,18 @@ async fn root_service_tier_change_updates_existing_subagent(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn evicted_role_subagent_uses_root_service_tier_after_reload() -> Result<()> {
     let server = start_mock_server().await;
+    // Child RESULT delivery can resume the root after its explicit spawn turn.
+    // Keep those turns separate from the exact one-request child tier assertions.
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/responses"))
+        .and(|request: &wiremock::Request| !request.headers.contains_key("x-openai-subagent"))
+        .respond_with(core_test_support::responses::sse_response(sse(vec![
+            ev_assistant_message("root-result-message", "worker result received"),
+            ev_completed("root-result-received"),
+        ])))
+        .with_priority(10)
+        .mount(&server)
+        .await;
     let mut builder = test_codex()
         .with_model("gpt-5.6-sol")
         .with_config(|config| {

@@ -7,58 +7,40 @@ Scenario: True mid-turn continuation compaction after tool output: compact reque
 ## Window 1
 -- request 1 (turn) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     function call limit push
 
 ## Window 2 (after request 1: settings changed (parallel_tool_calls, tools))
 -- request 2 (compaction) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     function call limit push
-05:function_call/test_tool:{}
-06:function_call_output:unsupported call: test_tool
-07:message/user:
+04:function_call/test_tool:{}
+05:function_call_output:unsupported call: test_tool
+06:message/user:
     <SUMMARIZATION_PROMPT>
 
-## Window 3 (after request 2: input diverged at item 05, settings changed (parallel_tool_calls, tools))
+## Window 3 (after request 2: input diverged at item 04, settings changed (parallel_tool_calls, tools))
 -- request 3 (turn) --
 00:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <MODEL_INSTRUCTIONS>
 01:message/developer:
-    Role: `/root`. Own the result and coordinate delegated work. Agent messages in analysis. `send_message`:... active agent, no new turn. `followup_task`: new turn [hash=ae93e86fb65ebd6a]
-    Collaboration tools: direct calls, not inside `functions.exec`. Shared filesystem and working directory. Coordinated edits. Others' changes preserved
-    Active-agent limit, including you: 4
-
-    `model` or `reasoning_effort`: only when explicitly requested by the user, AGENTS.md, or skills. Overrid...Omitted or `"all"`: parent model and effort inherited [hash=d4c4ef044a7cfe99]
-02:message/developer:
-    <MULTI_AGENT_MODE>
-03:message/user:
+    <PERMISSIONS_INSTRUCTIONS>
+02:message/user:
     <ENVIRONMENT_CONTEXT>
-04:message/user:
+03:message/user:
     function call limit push
-05:message/user:
+04:message/user:
     <COMPACTION_SUMMARY>
 
     AUTO_SUMMARY

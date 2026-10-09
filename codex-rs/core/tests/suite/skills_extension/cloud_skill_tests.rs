@@ -69,8 +69,14 @@ async fn progressive_cloud_reads_work_without_executor_and_through_code_mode(
         .with_config(move |config| {
             config.chatgpt_base_url = chatgpt_base_url;
             config.cloud_skill_enabled = true;
-            config.features.enable(Feature::CodeMode).unwrap();
-            config.features.enable(Feature::CodeModeHost).unwrap();
+            config
+                .features
+                .enable(Feature::CodeMode)
+                .expect("configure test feature flags");
+            config
+                .features
+                .enable(Feature::CodeModeHost)
+                .expect("configure test feature flags");
         })
         .with_code_mode_host_program(codex_utils_cargo_bin::cargo_bin("codex-code-mode-host")?);
     let test = builder.build_with_auto_env(&server).await?;

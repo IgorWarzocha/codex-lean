@@ -832,6 +832,11 @@ mod tests {
     }
 
     async fn build_test_config_for_codex_home(codex_home: &Path) -> Config {
+        std::fs::write(
+            codex_home.join("config.toml"),
+            "context_strategy = 'compaction'\n[features.code_mode]\nenabled = false\nruntime = 'v8'\n",
+        )
+        .expect("write ordinary in-process fixture config");
         match ConfigBuilder::default()
             .codex_home(codex_home.to_path_buf())
             .build()
@@ -1082,6 +1087,7 @@ mod tests {
             thread_id: "thread".to_string(),
             turn: codex_app_server_protocol::Turn {
                 id: "turn".to_string(),
+                root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),
                 status: codex_app_server_protocol::TurnStatus::Completed,

@@ -23,7 +23,7 @@ const INITIAL_SKILL_DESCRIPTION: &str = "INITIAL_HOST_SKILL_DESCRIPTION";
 const RUNTIME_SKILL_DESCRIPTION: &str = "RUNTIME_HOST_SKILL_DESCRIPTION";
 
 #[tokio::test]
-async fn host_skill_catalog_refreshes_once_when_skills_change() -> Result<()> {
+async fn host_skill_catalog_refreshes_on_demand_when_skills_change() -> Result<()> {
     skip_if_remote!(
         Ok(()),
         "host-local skill changes are not visible to remote executors"
@@ -32,13 +32,18 @@ async fn host_skill_catalog_refreshes_once_when_skills_change() -> Result<()> {
     let server = responses::start_mock_server().await;
     let response_mock = responses::mount_sse_sequence(
         &server,
-        (1..=3)
+        (1..=6)
             .map(|index| {
                 let response_id = format!("resp-{index}");
                 let message_id = format!("msg-{index}");
+                let item = if index % 2 == 1 {
+                    responses::ev_custom_tool_call(&format!("list-{index}"), "skills", "list")
+                } else {
+                    responses::ev_assistant_message(&message_id, "Done")
+                };
                 responses::sse(vec![
                     responses::ev_response_created(&response_id),
-                    responses::ev_assistant_message(&message_id, "Done"),
+                    item,
                     responses::ev_completed(&response_id),
                 ])
             })
@@ -112,7 +117,7 @@ stream_max_retries = 0
     run_turn(&mut app_server, &thread.id, "Unchanged follow-up").await?;
 
     let requests = response_mock.requests();
-    assert_eq!(3, requests.len());
+    assert_eq!(6, requests.len());
     let marker_counts = |marker| {
         requests
             .iter()
@@ -125,8 +130,19 @@ stream_max_retries = 0
             })
             .collect::<Vec<_>>()
     };
-    assert_eq!(vec![1, 2, 2], marker_counts(INITIAL_SKILL_DESCRIPTION));
-    assert_eq!(vec![0, 1, 1], marker_counts(RUNTIME_SKILL_DESCRIPTION));
+    assert_eq!(vec![0; 6], marker_counts(INITIAL_SKILL_DESCRIPTION));
+    assert_eq!(vec![0; 6], marker_counts(RUNTIME_SKILL_DESCRIPTION));
+    for (index, call_id) in [(1, "list-1"), (3, "list-3"), (5, "list-5")] {
+        let (output, _) = requests[index]
+            .custom_tool_call_output_content_and_success(call_id)
+            .expect("on-demand host skill catalog");
+        let output = output.expect("skill catalog text");
+        assert_eq!(output.matches(INITIAL_SKILL_DESCRIPTION).count(), 1);
+        assert_eq!(
+            output.matches(RUNTIME_SKILL_DESCRIPTION).count(),
+            usize::from(index > 1)
+        );
+    }
 
     Ok(())
 }

@@ -61,8 +61,7 @@ async fn universal_preferences_and_current_thread_seed_reach_text_and_voice_payl
     });
     let test = builder.build_with_auto_env(&api_server).await?;
     test.submit_turn("The task in this exact thread.").await?;
-    let text_request = response_mock.single_request().body_json();
-    let instructions = text_request["instructions"].as_str().unwrap();
+    let instructions = response_mock.single_request().instructions_text();
     assert!(instructions.starts_with("Native text baseline"));
     assert!(instructions.contains("user's preferred communication styles"));
     assert!(instructions.contains("Prefer concise, direct communication."));

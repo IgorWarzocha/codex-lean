@@ -15,6 +15,15 @@ impl TestCodexExecBuilder {
                 .expect("should find binary for codex-exec"),
         );
         cmd.current_dir(self.cwd.path())
+            // API-key mock providers do not implement remote Notes or code mode.
+            .args([
+                "-c",
+                "context_strategy=\"compaction\"",
+                "-c",
+                "features.code_mode={enabled=false,runtime=\"v8\"}",
+                "-c",
+                "features.code_mode_only=false",
+            ])
             .env("CODEX_HOME", self.home.path())
             .env("CODEX_SQLITE_HOME", self.home.path())
             .env(CODEX_API_KEY_ENV_VAR, "dummy");

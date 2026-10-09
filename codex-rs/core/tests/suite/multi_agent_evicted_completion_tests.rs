@@ -252,12 +252,7 @@ async fn nested_completion_preserves_handoff_across_residency_eviction(stop: boo
             test.thread_manager.get_thread(parent_id).await.is_err(),
             "Stop forbids auto-reload"
         );
-        assert!(
-            !resumed
-                .requests()
-                .iter()
-                .any(|request| request_has_result(request))
-        );
+        assert!(!resumed.requests().iter().any(request_has_result));
     } else {
         let restored = test.thread_manager.get_thread(parent_id).await?;
         assert!(!Arc::ptr_eq(&parent, &restored), "fresh parent runtime");

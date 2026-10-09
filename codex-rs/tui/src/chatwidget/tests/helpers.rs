@@ -2,6 +2,7 @@ use super::*;
 use codex_app_server_protocol::ImageGenerationItem;
 use codex_app_server_protocol::PluginAvailability;
 use codex_utils_absolute_path::test_support::PathExt;
+use pretty_assertions::assert_eq;
 
 pub(super) async fn test_config() -> (tempfile::TempDir, Config) {
     // Start from the built-in defaults so tests do not inherit host/system config.
@@ -9,9 +10,15 @@ pub(super) async fn test_config() -> (tempfile::TempDir, Config) {
         .prefix("chatwidget-tests-")
         .tempdir()
         .expect("tempdir");
+    // Session replacement reloads this home, so keep the fixture policy on disk too.
+    std::fs::write(
+        codex_home.path().join("config.toml"),
+        "context_strategy = \"compaction\"\n[features]\ncode_mode = { enabled = false, runtime = \"v8\" }\ncode_mode_only = false\nmulti_agent_v2 = false\n",
+    )
+    .expect("fixture config");
     let mut config = Config::load_default_with_cli_overrides_for_codex_home(
         codex_home.path().to_path_buf(),
-        Vec::new(),
+        crate::test_support::native_test_config_overrides(),
     )
     .await
     .expect("config");
@@ -1130,6 +1137,7 @@ pub(super) fn app_server_turn(
 ) -> AppServerTurn {
     AppServerTurn {
         id: turn_id.to_string(),
+        root_turn_id: None,
         items_view: codex_app_server_protocol::TurnItemsView::Full,
         items: Vec::new(),
         status,
@@ -1348,7 +1356,7 @@ pub(crate) fn render_bottom_popup(chat: &ChatWidget, width: u16) -> String {
                 if symbol.is_empty() {
                     line.push(' ');
                 } else {
-                    line.push_str(symbol);
+                    line.push_str(&crate::terminal_hyperlinks::strip_osc8(symbol));
                 }
             }
             line.trim_end().to_string()
@@ -1606,9 +1614,7 @@ pub(super) fn plugins_test_detail(
                 description: format!("{name} description"),
                 short_description: None,
                 interface: None,
-                path: Some(plugins_test_absolute_path(&format!(
-                    "skills/{name}/SKILL.md"
-                ))),
+                path: Some(plugins_test_absolute_path(&format!("skills/{name}/SKILL.md")).into()),
                 enabled: true,
             })
             .collect(),
@@ -1751,11 +1757,10 @@ pub(super) fn hook_run(
     }
 }
 
-pub(super) async fn assert_hook_events_snapshot(
+pub(super) async fn assert_hook_events(
     event_name: codex_app_server_protocol::HookEventName,
     run_id: &str,
     status_message: &str,
-    snapshot_name: &str,
 ) {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.on_task_started();
@@ -1816,7 +1821,7 @@ pub(super) async fn assert_hook_events_snapshot(
         .iter()
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
-    assert_chatwidget_snapshot!(snapshot_name, combined);
+    assert_eq!(combined, "↳ Hook · Heads up from the hook\n");
 }
 
 /// Normalize timestamps only in structurally identified completion footer cells.

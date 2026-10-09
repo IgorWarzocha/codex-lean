@@ -108,8 +108,10 @@ async fn shell_snapshot_concurrent_replays_keep_independent_readers(
     let deny_fd_path = sandbox_mode == SnapshotSandbox::DenyFdPath;
     let use_sandbox = sandbox_mode != SnapshotSandbox::None;
     if use_sandbox
-        && let Some(warning) =
-            codex_sandboxing::system_bwrap_warning(&PermissionProfile::read_only())
+        && let Some(warning) = codex_sandboxing::system_bwrap_warning(
+            &PermissionProfile::read_only(),
+            &std::env::current_dir()?,
+        )
     {
         eprintln!("skipping sandbox test: {warning}");
         return Ok(());
@@ -180,8 +182,16 @@ async fn shell_snapshot_concurrent_replays_keep_independent_readers(
             FileSystemAccessMode::Write,
         ));
         if deny_fd_path {
+            // Linux /dev/fd is a symlink into procfs; older bubblewrap cannot
+            // mount a denial onto that symlink. Hide its directory backing
+            // instead, which also blocks descriptor sourcing through aliases.
+            let descriptor_root = if cfg!(target_os = "linux") {
+                "/proc"
+            } else {
+                "/dev/fd"
+            };
             policy.entries.push(FileSystemSandboxEntry::new(
-                PathUri::from_host_native_path("/dev/fd")?.into(),
+                PathUri::from_host_native_path(descriptor_root)?.into(),
                 FileSystemAccessMode::Deny,
             ));
         } else {

@@ -101,6 +101,7 @@ async fn creation_attaches_to_original_task_and_survives_service_restart() -> co
     git(&repository, &["commit", "-m", "base"]);
     fs::write(repository.join("tracked.txt"), "source edits\n")?;
     let mut config = ConfigBuilder::default()
+        .cli_overrides(crate::test_support::native_test_config_overrides())
         .codex_home(home.path().to_path_buf())
         .harness_overrides(ConfigOverrides {
             cwd: Some(home.path().to_path_buf()),
@@ -189,7 +190,9 @@ async fn creation_attaches_to_original_task_and_survives_service_restart() -> co
         ConfigBuilder::default().codex_home(home.path().to_path_buf())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .cli_overrides(vec![("projects".to_owned(), toml::Value::try_from(json!({codex_config::loader::project_trust_key(&repository): {"trust_level":"untrusted"}}))?)]),
-        ConfigBuilder::default().codex_home(home.path().to_path_buf())
+        ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
+            .codex_home(home.path().to_path_buf())
             .loader_overrides(enterprise_loader)
             .cloud_config_bundle(codex_config::test_support::CloudConfigBundleFixture::loader_with_enterprise_config(format!("[projects.{:?}]\ntrust_level = \"untrusted\"\n", codex_config::loader::project_trust_key(&repository)))),
     ] {

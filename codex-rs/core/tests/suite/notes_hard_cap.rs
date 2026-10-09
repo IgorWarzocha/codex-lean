@@ -48,10 +48,16 @@ fn notes_fixture(scope: AutoCompactTokenLimitScope) -> TestCodexBuilder {
             model.max_context_window = Some(FULL_WINDOW);
         })
         .with_config(move |config| {
-            let base_url = config.model_provider.base_url.as_ref().unwrap();
+            let base_url = config
+                .model_provider
+                .base_url
+                .as_ref()
+                .expect("mock provider has a base URL");
             config.model_provider.base_url = Some(format!(
                 "{}/backend-api/codex",
-                base_url.strip_suffix("/v1").unwrap()
+                base_url
+                    .strip_suffix("/v1")
+                    .expect("mock provider URL ends in /v1")
             ));
             config.model_context_window = Some(FULL_WINDOW);
             config.model_auto_compact_token_limit = Some(32_000);
@@ -186,7 +192,9 @@ async fn context_events_report_selected_budget_independently_of_admission(
 }
 
 fn assert_same_window(requests: &[ResponsesRequest]) {
-    let first = requests[0].header("x-codex-window-id").unwrap();
+    let first = requests[0]
+        .header("x-codex-window-id")
+        .expect("request contains context window header");
     assert!(
         requests.iter().all(|request| {
             request.header("x-codex-window-id").as_deref() == Some(first.as_str())

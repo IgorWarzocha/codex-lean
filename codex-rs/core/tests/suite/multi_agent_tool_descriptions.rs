@@ -386,9 +386,18 @@ async fn channel_catalog_descriptions_change_only_selected_tools(exposure: Expos
                 config.multi_agent_v2.tool_namespace = Some("delegation".into());
                 config.multi_agent_v2.non_code_mode_only = false;
                 config.code_mode.runtime = CodeModeRuntime::V8;
-                config.features.disable(Feature::CodeMode).unwrap();
-                config.features.disable(Feature::CodeModeOnly).unwrap();
-                config.features.disable(Feature::CodeModePrewarm).unwrap();
+                config
+                    .features
+                    .disable(Feature::CodeMode)
+                    .expect("configure test feature flags");
+                config
+                    .features
+                    .disable(Feature::CodeModeOnly)
+                    .expect("configure test feature flags");
+                config
+                    .features
+                    .disable(Feature::CodeModePrewarm)
+                    .expect("configure test feature flags");
             })
             .build_with_auto_env(&server)
             .await?;

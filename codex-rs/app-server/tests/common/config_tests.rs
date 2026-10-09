@@ -2,6 +2,24 @@ use super::*;
 use tempfile::TempDir;
 
 #[test]
+fn mock_responses_config_leaves_feature_tables_to_fixture_and_launch_policy() {
+    let home = TempDir::new().expect("temporary CODEX_HOME");
+    MockResponsesConfig::new("http://127.0.0.1:1234")
+        .write(home.path())
+        .expect("write config");
+    let path = home.path().join("config.toml");
+    let baseline = std::fs::read_to_string(&path).expect("read config");
+    // Suites append their own feature table after writing the provider fixture.
+    let config = format!("{baseline}\n[features]\nplugins = true\n");
+    let parsed = config
+        .parse::<toml::Table>()
+        .expect("one valid feature table");
+    assert_eq!(parsed["context_strategy"].as_str(), Some("compaction"));
+    assert_eq!(parsed["features"]["plugins"].as_bool(), Some(true));
+    assert!(parsed["features"].get("code_mode").is_none());
+}
+
+#[test]
 fn mock_responses_config_composes_model_provider_features_and_extra_tables() {
     let home = TempDir::new().expect("temporary CODEX_HOME");
     MockResponsesConfig::new("http://127.0.0.1:1234")

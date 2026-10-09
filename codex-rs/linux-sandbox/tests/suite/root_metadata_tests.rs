@@ -18,7 +18,10 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
     if should_skip_bwrap_tests().await {
         return;
     }
-    let Some(bwrap) = codex_sandboxing::find_system_bwrap_in_path() else {
+    let Some(bwrap) = codex_sandboxing::find_system_bwrap_in_path(
+        &PermissionProfile::read_only().file_system_sandbox_policy(),
+        &std::env::current_dir().expect("current directory"),
+    ) else {
         eprintln!("skipping root metadata test: system bubblewrap is unavailable");
         return;
     };
@@ -32,6 +35,8 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
     fs::write(private.join("sibling"), "sibling").unwrap();
     codex_utils_cargo_bin::copy_executable(&codex_linux_sandbox_exe(), &work.join("sandbox"))
         .unwrap();
+    // The outer tmpfs root hides a system helper installed outside /usr or /bin.
+    codex_utils_cargo_bin::copy_executable(&bwrap, &work.join("bwrap")).unwrap();
 
     let path_entry = |path: &str, access| {
         FileSystemSandboxEntry::new(
@@ -86,7 +91,7 @@ async fn root_metadata_symlinks_cannot_reopen_approved_denials() {
             command.args(["--symlink", private_mount, "/private"]);
         }
         command.args(
-            "--chdir /tmp --setenv TMPDIR /tmp --setenv PATH /usr/bin:/bin".split_whitespace(),
+            "--chdir /tmp --setenv TMPDIR /tmp --setenv PATH /tmp:/usr/bin:/bin".split_whitespace(),
         );
         command.args(
             "-- /tmp/sandbox --sandbox-policy-cwd /tmp --permission-profile".split_whitespace(),

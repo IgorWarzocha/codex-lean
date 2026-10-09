@@ -227,10 +227,10 @@ impl ResponsesRequest {
     }
 
     pub fn instructions_text(&self) -> String {
-        self.body_json()["instructions"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        self.message_input_texts("developer")
+            .into_iter()
+            .next()
+            .expect("base instructions developer message")
     }
 
     /// Returns all `input_text` spans from `message` inputs for the provided role.
@@ -478,6 +478,33 @@ mod tests {
     use pretty_assertions::assert_eq;
     use wiremock::http::HeaderMap;
     use wiremock::http::Method;
+
+    #[tokio::test]
+    async fn response_mock_records_only_requests_passing_its_matcher() {
+        let server = MockServer::start().await;
+        let recorder = mount_sse_once_match(
+            &server,
+            wiremock::matchers::header("thread-id", "worker"),
+            sse_completed("worker-result"),
+        )
+        .await;
+        let client = codex_http_client::HttpClientBuilder::new()
+            .build_direct()
+            .unwrap();
+        for thread in ["root", "worker"] {
+            client
+                .post(format!("{}/v1/responses", server.uri()))
+                .header("thread-id", thread)
+                .json(&serde_json::json!({"input": []}))
+                .send()
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            recorder.single_request().header("thread-id").as_deref(),
+            Some("worker")
+        );
+    }
 
     fn request_with_input(input: Value) -> ResponsesRequest {
         ResponsesRequest(wiremock::Request {
@@ -1088,7 +1115,8 @@ pub fn sse_response(body: String) -> ResponseTemplate {
 
 pub async fn mount_response_once(server: &MockServer, response: ResponseTemplate) -> ResponseMock {
     let (mock, response_mock) = base_mock();
-    mock.respond_with(response)
+    mock.and(response_mock.clone())
+        .respond_with(response)
         .up_to_n_times(1)
         .mount(server)
         .await;
@@ -1105,6 +1133,7 @@ where
 {
     let (mock, response_mock) = base_mock();
     mock.and(matcher)
+        .and(response_mock.clone())
         .respond_with(response)
         .up_to_n_times(1)
         .mount(server)
@@ -1113,10 +1142,9 @@ where
 }
 
 fn base_mock() -> (MockBuilder, ResponseMock) {
+    // Callers attach the recorder last: a failed routing matcher must not record.
     let response_mock = ResponseMock::new();
-    let mock = Mock::given(method("POST"))
-        .and(path_regex(".*/responses$"))
-        .and(response_mock.clone());
+    let mock = Mock::given(method("POST")).and(path_regex(".*/responses$"));
     (mock, response_mock)
 }
 
@@ -1134,6 +1162,7 @@ where
 {
     let (mock, response_mock) = base_mock();
     mock.and(matcher)
+        .and(response_mock.clone())
         .respond_with(sse_response(body))
         .up_to_n_times(1)
         .mount(server)
@@ -1143,7 +1172,8 @@ where
 
 pub async fn mount_sse_once(server: &MockServer, body: String) -> ResponseMock {
     let (mock, response_mock) = base_mock();
-    mock.respond_with(sse_response(body))
+    mock.and(response_mock.clone())
+        .respond_with(sse_response(body))
         .up_to_n_times(1)
         .mount(server)
         .await;
@@ -1496,7 +1526,8 @@ pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> Res
     };
 
     let (mock, response_mock) = base_mock();
-    mock.respond_with(responder)
+    mock.and(response_mock.clone())
+        .respond_with(responder)
         .up_to_n_times(num_calls as u64)
         .expect(num_calls as u64)
         .mount(server)
@@ -1536,7 +1567,8 @@ pub async fn mount_response_sequence(
     };
 
     let (mock, response_mock) = base_mock();
-    mock.respond_with(responder)
+    mock.and(response_mock.clone())
+        .respond_with(responder)
         .up_to_n_times(num_calls as u64)
         .expect(num_calls as u64)
         .mount(server)

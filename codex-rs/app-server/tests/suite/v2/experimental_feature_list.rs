@@ -35,6 +35,20 @@ async fn experimental_feature_list_returns_feature_metadata_with_stage() -> Resu
     let codex_home = TempDir::new()?;
     let config = ConfigBuilder::default()
         .codex_home(codex_home.path().to_path_buf())
+        .cli_overrides(vec![
+            (
+                "context_strategy".to_string(),
+                toml::Value::String("compaction".to_string()),
+            ),
+            (
+                "features.code_mode.enabled".to_string(),
+                toml::Value::Boolean(false),
+            ),
+            (
+                "features.code_mode.runtime".to_string(),
+                toml::Value::String("v8".to_string()),
+            ),
+        ])
         .fallback_cwd(Some(codex_home.path().to_path_buf()))
         .loader_overrides(LoaderOverrides::with_managed_config_path_for_tests(
             codex_home.path().join("managed_config.toml"),

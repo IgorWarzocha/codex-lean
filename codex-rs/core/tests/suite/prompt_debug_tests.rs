@@ -23,6 +23,10 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
     std::fs::write(codex_home.path().join("AGENTS.md"), TEST_INSTRUCTIONS)?;
     let config = ConfigBuilder::default()
         .codex_home(codex_home.path().to_path_buf())
+        .cli_overrides(vec![(
+            "context_strategy".to_string(),
+            toml::Value::String("compaction".to_string()),
+        )])
         .harness_overrides(ConfigOverrides {
             cwd: Some(cwd.path().to_path_buf()),
             codex_self_exe: Some(std::env::current_exe()?),

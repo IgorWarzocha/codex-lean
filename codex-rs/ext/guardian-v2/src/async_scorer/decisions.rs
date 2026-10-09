@@ -1,14 +1,13 @@
 //! Bounded Decisions transport for the optional Guardian comparison classifier.
 //! Admission retains the newest requests and cancels the oldest unfinished request at capacity.
 //! Unsupported evidence is rejected intact; errors never contain credentials or wire bodies.
+//! Only host-annotated trusted-tool evidence is appended to the developer-level rubric.
 //! The caller records measurements after baseline publication; dropping its task aborts Decisions work.
 
-use super::metrics::decisions_failure_reason;
-use super::metrics::record_decisions_comparison_outcome;
 use super::sampler::LunaSampler;
 use super::sampler::LunaSamplingRequest;
 use codex_context_fragments::RenderedFragment;
-use codex_extension_api::ExtensionMetrics;
+use codex_guardian_context::TrustedTool;
 use codex_history::ResponseItemEnvelope;
 use codex_http_client::HttpClient;
 use codex_protocol::models::ContentItem;
@@ -89,35 +88,10 @@ impl Drop for DecisionsTask {
 }
 
 impl DecisionsTask {
-    pub(super) async fn finish_and_record_outcome(
+    pub(super) async fn finish(
         mut self,
-        metrics: Option<&dyn ExtensionMetrics>,
-    ) {
-        let (result, _duration) = match (&mut self.handle).await {
-            Ok(result) => result,
-            Err(error) => {
-                let (outcome, reason) = if error.is_cancelled() {
-                    ("skipped", "superseded")
-                } else {
-                    ("failure", "task_error")
-                };
-                record_decisions_comparison_outcome(metrics, outcome, reason);
-                return;
-            }
-        };
-        let outcome = match &result {
-            Ok(_) => "success",
-            Err(DecisionsError::UnsupportedEvidence | DecisionsError::InputTooLarge) => "skipped",
-            Err(_) => "failure",
-        };
-        record_decisions_comparison_outcome(
-            metrics,
-            outcome,
-            result
-                .as_ref()
-                .err()
-                .map_or("none", |error| decisions_failure_reason(*error)),
-        );
+    ) -> Result<(Result<&'static str, DecisionsError>, Duration), tokio::task::JoinError> {
+        (&mut self.handle).await
     }
 }
 
@@ -146,6 +120,7 @@ impl DecisionsSampler {
         request: &LunaSamplingRequest,
         max_input_tokens: usize,
     ) -> DecisionsTask {
+        let started = Instant::now();
         let body = request_body(
             &request.instructions,
             &request.input,
@@ -173,7 +148,7 @@ impl DecisionsSampler {
             Ok(body) => body,
             Err(error) => {
                 return DecisionsTask {
-                    handle: tokio::spawn(async move { (Err(error), Duration::ZERO) }),
+                    handle: tokio::spawn(async move { (Err(error), started.elapsed()) }),
                     sampler: Weak::new(),
                 };
             }
@@ -191,9 +166,8 @@ impl DecisionsSampler {
         let sampler = Arc::clone(self);
         let handle = tokio::spawn(async move {
             let Ok(_permit) = sampler.slots.acquire().await else {
-                return (Err(DecisionsError::Transport), Duration::ZERO);
+                return (Err(DecisionsError::Transport), started.elapsed());
             };
-            let started = Instant::now();
             let result = tokio::time::timeout(DEADLINE, sampler.request(body))
                 .await
                 .unwrap_or(Err(DecisionsError::Timeout));
@@ -246,14 +220,34 @@ fn request_body(
     let ContentItem::InputText { text: rubric } = instructions.annotated_content().content() else {
         return Err(DecisionsError::UnsupportedEvidence);
     };
+    let mut rubric = rubric.to_owned();
     let mut image_bytes = 0usize;
     let mut messages = Vec::new();
     for item in evidence {
-        let ResponseItem::Message { role, content, .. } = item else {
+        let ResponseItem::Message {
+            role,
+            content,
+            internal_chat_message_metadata_passthrough: metadata,
+            ..
+        } = item
+        else {
             return Err(DecisionsError::UnsupportedEvidence);
         };
-        if role != "user" {
-            return Err(DecisionsError::UnsupportedEvidence);
+        let kinds = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.content_item_kinds.as_deref());
+        // Decisions only accepts user input, so keep Codex's trusted-tool note in the rubric.
+        // This preserves its developer role; other developer messages remain unsupported.
+        match (role.as_str(), content.as_slice(), kinds) {
+            ("developer", [ContentItem::InputText { text }], Some([kind]))
+                if kind.0 == TrustedTool::KIND =>
+            {
+                rubric.push_str("\n\n");
+                rubric.push_str(text);
+                continue;
+            }
+            ("user", _, _) => {}
+            _ => return Err(DecisionsError::UnsupportedEvidence),
         }
         let mut parts = Vec::new();
         for part in content {
@@ -282,16 +276,17 @@ fn request_body(
             }
         }
         // Harness annotations/IDs are not part of the Decisions contract. Preserve every
-        // model-visible content part and message boundary; never demote trusted developer text.
+        // user content part and message boundary.
         let mut message = json!({"role": "user"});
         message["content"] = Value::Array(parts);
         messages.push(message);
     }
     let mut body = json!({
         "model": MODEL,
-        "questions": [{"type": "choice", "name": "guardian_risk", "instructions": rubric,
+        "questions": [{"type": "choice", "name": "guardian_risk",
                        "choices": [{"value": "low"}, {"value": "high"}]}]
     });
+    body["questions"][0]["instructions"] = Value::String(rubric);
     body["input"] = Value::Array(messages);
     Ok(body)
 }

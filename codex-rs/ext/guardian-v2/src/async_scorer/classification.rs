@@ -266,6 +266,7 @@ impl Classification {
             super::metrics::record_section_costs(metrics.as_deref(), context.section_costs());
         }
         let mut decisions_task = None;
+        let mut responses_duration = None;
         let mut failure_reason = "invalid_output";
         let mut classification_risk = None;
         let mut classification_finished_at = None;
@@ -323,7 +324,10 @@ impl Classification {
                             "not_initialized",
                         );
                     }
-                    sampler.sample(sampling).await
+                    let sampling_started = Instant::now();
+                    let result = sampler.sample(sampling).await;
+                    responses_duration = Some(sampling_started.elapsed());
+                    result
                 }
 
                 ClassificationContext::Conversation {
@@ -468,6 +472,12 @@ impl Classification {
                 "superseded",
             );
         }
+        // Only compare against a score accepted by the authoritative publication path.
+        let baseline_risk = if matches!(result, Ok(ClassificationOutcome::Scored)) {
+            classification_risk
+        } else {
+            None
+        };
         if let Err(error) = result {
             event_sink.emit_warning(ExtensionWarning {
                 thread_id,
@@ -476,9 +486,26 @@ impl Classification {
             });
         }
         if let Some(decisions_task) = decisions_task {
-            decisions_task
-                .finish_and_record_outcome(metrics.as_deref())
-                .await;
+            super::metrics::record_decisions_comparison(
+                decisions_task.finish().await,
+                baseline_risk.zip(responses_duration),
+                metrics.as_deref(),
+            );
+        } else if config
+            .features
+            .enabled(codex_features::Feature::GuardianV2DecisionsComparison)
+            && let Some(risk) = baseline_risk
+            && let Some(metrics) = metrics.as_deref()
+        {
+            metrics.counter(
+                "codex.guardian_v2.decisions_comparison.comparison",
+                /*inc*/ 1,
+                &[
+                    ("comparison", "unavailable"),
+                    ("responses", risk),
+                    ("decisions", "unavailable"),
+                ],
+            );
         }
     }
 }

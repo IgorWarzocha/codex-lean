@@ -25,6 +25,7 @@ use codex_core_api::ConfigLoadOptions;
 use codex_core_api::ConfigRequirements;
 use codex_core_api::ConfigRequirementsToml;
 use codex_core_api::Constrained;
+use codex_core_api::ContextStrategy;
 use codex_core_api::EnvironmentManager;
 use codex_core_api::EventMsg;
 use codex_core_api::ExecServerRuntimeOptions;
@@ -264,10 +265,14 @@ async fn new_config(
         show_raw_agent_reasoning: false,
         base_instructions: None,
         base_instructions_provenance: None,
+        personality_file: codex_home.join("codex_personality.md"),
+        personality_file_required: false,
+        communication_preferences: None,
         developer_instructions: None,
         guardian_policy_config: None,
         guardian_extra_policy: None,
         guardian_policy_template: None,
+        guardian_transcript_mode: Default::default(),
         guardian_conversation_history_prompt: None,
         guardian_conversation_history_max_output_tokens: None,
         guardian_circuit_break_action: Default::default(),
@@ -304,6 +309,7 @@ async fn new_config(
         terminal_resize_reflow: TerminalResizeReflowConfig::default(),
         tui_keymap: TuiKeymap::default(),
         tui_session_picker_view: SessionPickerViewMode::Dense,
+        tui_agents_overview_grouping: Default::default(),
         tui_resume_cwd: None,
         tui_vim_mode_default: false,
         tui_question_esc_back: true,
@@ -377,6 +383,10 @@ async fn new_config(
         max_goal_token_budget: None,
         token_budget: None,
         token_budget_startup_config: None,
+        // This minimal sample does not install the remote Notes extension.
+        context_strategy: ContextStrategy::Compaction,
+        compaction_retention_tokens: Default::default(),
+        context_idle_rollover_minutes: None,
         rollout_budget: None,
         current_time_reminder: None,
         sleep_tool_mode: Default::default(),

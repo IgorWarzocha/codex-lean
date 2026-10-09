@@ -7,6 +7,15 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
 ## Window 1
 -- request 1 (turn) --
 00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer:
     <permissions instructions>
     `sandbox_mode`: `read-only`. Reads only. Network access: restricted
     Approval policy: `on-request`. Needed access through command approval parameters, not a separate message...d"` with a short approval question in `justification` [hash=6edee554ee91cf66]
@@ -17,7 +26,7 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
 
     Shell control operators: independently evaluated segments. Approved prefixes do not authorize whole compound commands. Complex syntax may prevent rule matching
     </permissions instructions>
-01:message/user[2]:
+02:message/user[2]:
     [01] # AGENTS.md instructions
 
         <INSTRUCTIONS>
@@ -33,10 +42,10 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
             - <UUID 1>
           </subagents>
         </environment_context>
-02:message/user:
+03:message/user:
     continue with the current instructions
 -- request 2 (turn) --
-03:message/user:
+04:message/user:
     # AGENTS.md instructions
 
     <INSTRUCTIONS>
@@ -44,24 +53,33 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
 
     Never send email.
     </INSTRUCTIONS>
-04:message/user:
+05:message/user:
     continue with the current instructions
 -- request 3 (turn) --
-05:message/user:
+06:message/user:
     # AGENTS.md instructions
 
     <INSTRUCTIONS>
     Prior AGENTS.md instructions no longer applicable
     </INSTRUCTIONS>
-06:message/user:
-    continue with the current instructions
--- request 4 (turn) --
 07:message/user:
     continue with the current instructions
+-- request 4 (turn) --
+08:message/user:
+    continue with the current instructions
 
-## Window 2 (after request 4: input diverged at item 01, settings changed (prompt_cache_key))
+## Window 2 (after request 4: input diverged at item 02, settings changed (prompt_cache_key))
 -- request 5 (turn) --
 00:message/developer:
+    Complete the request. Questions only for missing information that changes the work
+
+    Follow applicable AGENTS.md instructions. Supplied ancestors need no rereading. Nested instructions: check where you work
+
+    Preserve unrelated uncommitted changes. Destructive Git commands only with explicit approval
+
+    Active sandbox and approval policy. No bypasses or repackaged rejected commands
+
+01:message/developer:
     <permissions instructions>
     `sandbox_mode`: `read-only`. Reads only. Network access: restricted
     Approval policy: `on-request`. Needed access through command approval parameters, not a separate message...d"` with a short approval question in `justification` [hash=6edee554ee91cf66]
@@ -72,7 +90,7 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
 
     Shell control operators: independently evaluated segments. Approved prefixes do not authorize whole compound commands. Complex syntax may prevent rule matching
     </permissions instructions>
-01:message/user[2]:
+02:message/user[2]:
     [01] # AGENTS.md instructions
 
         <INSTRUCTIONS>
@@ -85,10 +103,10 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
           <timezone><HOST_TIMEZONE></timezone>
           <filesystem><workspace_roots><root><CWD></root></workspace_roots><permission_profile type="managed"><f...ntry></file_system></permission_profile></filesystem> [hash=e8c1de60307d0a3d]
         </environment_context>
-02:message/user:
+03:message/user:
     continue with the current instructions
 -- request 6 (turn) --
-03:message/user:
+04:message/user:
     # AGENTS.md instructions
 
     <INSTRUCTIONS>
@@ -96,17 +114,17 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
 
     Never send email.
     </INSTRUCTIONS>
-04:message/user:
+05:message/user:
     continue with the current instructions
 -- request 7 (turn) --
-05:message/user:
+06:message/user:
     # AGENTS.md instructions
 
     <INSTRUCTIONS>
     Prior AGENTS.md instructions no longer applicable
     </INSTRUCTIONS>
-06:message/user:
+07:message/user:
     continue with the current instructions
 -- request 8 (turn) --
-07:message/user:
+08:message/user:
     continue with the current instructions

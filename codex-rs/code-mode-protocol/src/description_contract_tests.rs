@@ -1,6 +1,7 @@
 //! Standing signatures are lossy hints. Runtime help must remain lossless.
 
 use super::CodeModeToolKind;
+use super::DeferredToolDiscovery;
 use super::ImageDetailVisibility;
 use super::MCP_TYPESCRIPT_PREAMBLE;
 use super::ToolDefinition;
@@ -54,11 +55,13 @@ fn standing(
         30000,
         true,
         ImageDetailVisibility::Visible,
+        DeferredToolDiscovery::Catalog,
         Some(&CodeModeToolMessages {
             exec: Some(codex_protocol::openai_models::ToolMessage {
                 description: Some(String::new()),
                 ..Default::default()
             }),
+            deferred_nested_tools_guidance: Some(String::new()),
             ..Default::default()
         }),
     )

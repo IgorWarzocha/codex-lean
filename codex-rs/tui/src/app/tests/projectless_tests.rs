@@ -163,7 +163,7 @@ sandbox = "unelevated"
     })
     .await??;
     response.single_request();
-    let next = app.load_new_session_config(&server).await?;
+    let (next, _) = app.load_new_session_config(&server).await?;
     assert_eq!(
         next.permissions.permission_profile(),
         &PermissionProfile::workspace_write()
@@ -291,6 +291,7 @@ async fn local_projectless_defaults_respect_trust_scope_and_explicit_settings() 
             ..Default::default()
         };
         let mut config = ConfigBuilder::default()
+            .cli_overrides(crate::test_support::native_test_config_overrides())
             .codex_home(home.path().to_path_buf())
             .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
             .harness_overrides(overrides.clone())
@@ -328,6 +329,7 @@ async fn local_projectless_defaults_respect_trust_scope_and_explicit_settings() 
         let startup = crate::app::startup::prepare_fresh_startup_config(
             &mut config,
             &server,
+            &AppServerTarget::Embedded,
             &[],
             &overrides,
             &EnvironmentManager::default_for_tests(),
