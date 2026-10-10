@@ -1,10 +1,21 @@
-"""Compatibility belongs to the instruction code we edit, not an app release."""
+"""Verify audited native code boundaries before desktop transformations."""
 
 import hashlib
 import re
 from dataclasses import dataclass
 
 from asar import Asar, UnsupportedBundle
+
+
+LOCAL_ATTACHMENT_CLEANUP_TEXT = "f58882002e92218b5689a2303a21cb1e28aa8b7481c5e66518e8f08ea6b671b3"
+# The durable cloud manager has no host filesystem without a task environment.
+# Audit the entire startup owner, including registration and first invocation.
+ATTACHMENT_CLEANUP = (
+    "let C=()=>{for(let e of s.getAll()){let t=s.getImplForHostId(e.getHostId());"
+    "t==null||S.current.has(t)||(S.current.add(t),"
+    "t.cleanupPendingPastedTextAttachments().catch(Isc))}},"
+    "w=s.addRegistryCallback(C);return C(),"
+)
 
 
 # Captured from Linux 26.930.21537, 26.930.31730, 26.930.41038, 26.930.61225,
@@ -16,7 +27,7 @@ FINGERPRINTS = {
     "text": {
         "4d1009145aafadfc653b2ba11a3f9be18d62e82f900d02a33aa05744abeffaf5",
         "f4d4bbe4aacdb97581292a06c3228ae92dcb8a3c3fd7ff89d29aeb59c555bbb8",
-        "f58882002e92218b5689a2303a21cb1e28aa8b7481c5e66518e8f08ea6b671b3",
+        LOCAL_ATTACHMENT_CLEANUP_TEXT,
     },
     "rpc": {"abdb4bc77855a4566b117625888c1dbcd40a33702953b205d2f5d1ab0a0e5269"},
     "call": {
@@ -119,7 +130,22 @@ def inspect_regions(bundle: Asar) -> BundleLayout:
         r"initialItems:i,offerSdp:a,prompt:o,)",
         "var ",
     )
+    skip_cloud_attachment_cleanup(initial, text)
     return BundleLayout(main_path, preload_path, initial_path, text, rpc, call)
+
+
+def skip_cloud_attachment_cleanup(source: str, text: CodeRegion) -> str:
+    if text.fingerprint != LOCAL_ATTACHMENT_CLEANUP_TEXT:
+        return source
+    if source.count(ATTACHMENT_CLEANUP) != 1 or source.count(
+        "cleanupPendingPastedTextAttachments().catch("
+    ) != 1:
+        raise UnsupportedBundle("attachment cleanup owner missing or unfamiliar")
+    guarded = ATTACHMENT_CLEANUP.replace(
+        "for(let e of s.getAll()){",
+        "for(let e of s.getAll()){if(e.getHostId()===`durable`)continue;",
+    )
+    return source.replace(ATTACHMENT_CLEANUP, guarded)
 
 
 def append_text(region: CodeRegion) -> str:

@@ -33,6 +33,8 @@ Only verified default string literals change, not the composed instructions. Use
 
 The complete patch has been validated offline against Linux 26.930.31730, 26.930.41038, 26.930.61225 and 26.1007.21434. The 26.1007.21434 audit covers its shared desktop instruction composer and updated voice call boundaries. Native PR diff links, artifact follow-ups and backend model and thinking-effort metadata remain intact. Other releases and macOS need their instruction boundaries audited before they can be supported. Compatibility follows the checked code boundaries, not the version label.
 
+On Linux 26.1007.21434, the patch also prevents startup attachment cleanup from running against the durable cloud manager, which has no filesystem without a task environment. Local and SSH attachment cleanup continues unchanged. Cloud file requests still require their environment ID; that validation is not bypassed. The startup cleanup owner is checked before writing, including during `--check`.
+
 ## macOS
 
 macOS is not currently supported by the complete patch because its default desktop instruction boundaries have not been audited. Once those boundaries are supported, use the archive inside the app bundle. The current official DMG names the app ChatGPT.app, despite its Codex bundle identity. Supply its matching `Info.plist` so the script can generate updated ASAR integrity metadata:

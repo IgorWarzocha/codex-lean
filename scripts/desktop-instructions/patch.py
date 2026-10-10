@@ -10,7 +10,13 @@ from pathlib import Path
 
 from asar import Asar, UnsupportedBundle
 from app_instructions import slim_defaults
-from regions import BundleLayout, append_text, append_voice, inspect_regions
+from regions import (
+    BundleLayout,
+    append_text,
+    append_voice,
+    inspect_regions,
+    skip_cloud_attachment_cleanup,
+)
 
 
 HERE = Path(__file__).resolve().parent
@@ -103,7 +109,9 @@ def replacements(
     )
     preload = (HERE / "runtime-preload.js").read_bytes()
     native_main = bundle.read(layout.main).decode("utf-8")
-    initial = bundle.read(layout.initial).decode("utf-8")
+    initial = skip_cloud_attachment_cleanup(
+        bundle.read(layout.initial).decode("utf-8"), layout.text
+    )
     native_main = native_main.replace(layout.text.source, append_text(layout.text))
     for region in (layout.rpc, layout.call):
         initial = initial.replace(region.source, append_voice(region))

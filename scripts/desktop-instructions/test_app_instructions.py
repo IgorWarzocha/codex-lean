@@ -268,7 +268,10 @@ class AppInstructionsTests(unittest.TestCase):
         files = {key: value for key, value in self.files.items() if key not in (BOOTSTRAP, WORKER)}
         files[shared] = capture["shared"].encode()
         files[MAIN] = ("const e=require('original');class Owner{" + capture["text"] + "async isNonGitWorkspace(){}};").encode()
-        files[INITIAL] = (capture["rpc"] + capture["call"] + "var untouched=1;").encode()
+        files[INITIAL] = (
+            capture["rpc"] + capture["call"] + "var untouched=1;"
+            + "function capturedCleanup(){" + capture["cleanup"] + "0;}"
+        ).encode()
         fixture(self.source, files)
         self.assertEqual(self.invoke("--check"), 0)
         self.assertEqual(self.invoke("--output", str(self.output)), 0)
@@ -283,6 +286,12 @@ class AppInstructionsTests(unittest.TestCase):
                 "before": capture["call"],
                 "after": patched.read(INITIAL).decode().split(regions.append_voice(regions.CodeRegion("rpc", capture["rpc"])))[1].split("var untouched=1;")[0],
             }, "12 native call payload comparisons passed"),
+            ("test_attachment_cleanup.cjs", {
+                "before": capture["cleanup"],
+                "after": regions.skip_cloud_attachment_cleanup(
+                    capture["cleanup"], regions.CodeRegion("text", capture["text"])
+                ),
+            }, "Native local and SSH cleanup preserved; environmentless cloud cleanup skipped"),
         ):
             result = subprocess.run(["node", str(HERE / script)], input=json.dumps({**payload, "version": "21434"}), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -293,6 +302,7 @@ class AppInstructionsTests(unittest.TestCase):
             (shared, b"n&&t?", b"n||t?"),
             (shared, b"heartbeatEnabled:r!=null&&tI(r)", b"heartbeatEnabled:!1"),
             (INITIAL, b"g.backend_model_name=e", b"g.backend_model_name=null"),
+            (INITIAL, b"w=s.addRegistryCallback(C)", b"w=s.addRegistryCallback(other)"),
             (MAIN, b"this.customInstructions?.read()", b"null"),
         ):
             with self.subTest(owner=owner, original=original):
