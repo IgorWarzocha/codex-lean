@@ -10,10 +10,13 @@ from asar import Asar, UnsupportedBundle
 # Captured from Linux 26.930.21537, 26.930.31730, 26.930.41038, 26.930.61225,
 # and macOS 26.930.31730. The later Linux calls only rename minifier identifiers.
 # These are code-region fingerprints, not copied prompts or protocol schemas.
+# Linux 26.1007.21434 keeps text composition and RPC semantics; its native
+# call adds backend model/effort metadata and renames the prompt binding to o.
 FINGERPRINTS = {
     "text": {
         "4d1009145aafadfc653b2ba11a3f9be18d62e82f900d02a33aa05744abeffaf5",
         "f4d4bbe4aacdb97581292a06c3228ae92dcb8a3c3fd7ff89d29aeb59c555bbb8",
+        "f58882002e92218b5689a2303a21cb1e28aa8b7481c5e66518e8f08ea6b671b3",
     },
     "rpc": {"abdb4bc77855a4566b117625888c1dbcd40a33702953b205d2f5d1ab0a0e5269"},
     "call": {
@@ -22,6 +25,7 @@ FINGERPRINTS = {
         "efb9d9140960a8d048c48502c3d30060e797e116a9056314a7a29e1c74acf3bf",
         "2510228c0a4280c870f03ff92f218cb8cfc8fab254cf0e0c1d56315afcb893e9",
         "7ea4cdce4ae39c1d84fb86d95526ae9d2b33a385788ac7c4d48417df0a505fba",
+        "e037b9f9bf7499bdb38d0b887a3b5f0fbcf1e9ec7d8465b6db96309a356c9ed1",
     },
 }
 MARKERS = ("codex-user-personality-v2", "codex-user-voice-prompt-v1")
@@ -109,7 +113,10 @@ def inspect_regions(bundle: Asar) -> BundleLayout:
     call = extract(
         initial,
         "call",
-        r"async function [\w$]+\(\{codexSessionId:e,conversationId:t,initialItems:n,offerSdp:r,prompt:i,",
+        r"async function [\w$]+\(\{(?:"
+        r"codexSessionId:e,conversationId:t,initialItems:n,offerSdp:r,prompt:i,|"
+        r"backendModel:e,backendThinkingEffort:t,codexSessionId:n,conversationId:r,"
+        r"initialItems:i,offerSdp:a,prompt:o,)",
         "var ",
     )
     return BundleLayout(main_path, preload_path, initial_path, text, rpc, call)
@@ -131,6 +138,10 @@ def append_voice(region: CodeRegion) -> str:
             "...s==null?{}:{prompt:s}",
             "...s==null?{}:{prompt:globalThis.codexUserPersonality.append(s)}",
         )
+    prompt = "o" if "{backendModel:e," in region.source else "i"
+    native = f"instructions:{prompt}"
+    if region.source.count(native) != 2:
+        raise UnsupportedBundle("native call prompt boundaries are unfamiliar")
     return region.source.replace(
-        "instructions:i", "instructions:globalThis.codexUserPersonality.append(i)"
+        native, f"instructions:globalThis.codexUserPersonality.append({prompt})"
     )

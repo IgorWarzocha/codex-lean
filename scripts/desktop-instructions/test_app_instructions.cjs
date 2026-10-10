@@ -6,7 +6,9 @@ const { before, after, sections, version } = JSON.parse(
   fs.readFileSync(0, "utf8"),
 );
 const symbols =
-  version === "61225"
+  version === "21434"
+    ? { shared: { boundary: "var dG=", defaults: ["WW", "YW", "ZW"], compose: "uG(options)" } }
+    : version === "61225"
     ? {
         bootstrap: {
           boundary: "var TR=",
@@ -38,13 +40,13 @@ const evaluate = (source, owner) => {
   const end = source.indexOf(symbols[owner].boundary);
   assert(end > start);
   const heartbeat = (id) => id === "heartbeat";
-  const context = vm.createContext({ _k: heartbeat, vk: heartbeat });
+  const context = vm.createContext({ _k: heartbeat, vk: heartbeat, tI: heartbeat });
   vm.runInContext(source.slice(start, end), context);
   return context;
 };
 
 let comparisons = 0;
-for (const owner of ["bootstrap", "worker"]) {
+for (const owner of Object.keys(symbols)) {
   const native = evaluate(before[owner], owner);
   const slim = evaluate(after[owner], owner);
   const expected = evaluate(before[owner], owner);

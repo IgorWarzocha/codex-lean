@@ -27,11 +27,11 @@ A missing default file or an empty file adds nothing. An existing unreadable fil
 
 ## Lean desktop guidance
 
-Every patch run shortens the default media, thread coordination, and sidebar sections. There is no separate flag. Both native instruction owners are checked before writing anything, including during `--check`.
+Every patch run shortens the default media, thread coordination, and sidebar sections. There is no separate flag. All native instruction owners are checked before writing anything, including during `--check`.
 
 Only verified default string literals change, not the composed instructions. User preferences, instruction overrides, Git settings, feature flags, projectless paths, LaTeX guidance, and other native sections remain intact. Native realtime instructions and the personality append behavior are unchanged. Missing, ambiguous, malformed, or unfamiliar default instructions or composers reject the entire patch rather than falling back to personality-only output.
 
-The complete patch has been validated offline against Linux 26.930.31730, 26.930.41038 and 26.930.61225. Other releases and macOS need their default instruction boundaries audited before they can be supported. Compatibility follows the checked code boundaries, not the version label.
+The complete patch has been validated offline against Linux 26.930.31730, 26.930.41038, 26.930.61225 and 26.1007.21434. The 26.1007.21434 audit covers its shared desktop instruction composer and updated voice call boundaries. Native PR diff links, artifact follow-ups and backend model and thinking-effort metadata remain intact. Other releases and macOS need their instruction boundaries audited before they can be supported. Compatibility follows the checked code boundaries, not the version label.
 
 ## macOS
 

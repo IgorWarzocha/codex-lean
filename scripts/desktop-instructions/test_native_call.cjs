@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 
 // Execute the captured native function. Only its external IO is controlled.
-const { before, after } = JSON.parse(fs.readFileSync(0, "utf8"));
+const { before, after, version } = JSON.parse(fs.readFileSync(0, "utf8"));
 const suffix = "\n\nCommunication preferences";
 
 async function invoke(source, args) {
@@ -36,6 +36,12 @@ async function invoke(source, args) {
       }),
     },
   };
+  if (version === "21434") {
+    Object.assign(context, {
+      Xa: context.Kp, Ig: context.Zm, Qdc: 256,
+      Zdc: context.D9s, ec: context.eg,
+    });
+  }
   const call = vm.runInNewContext("(" + source + ")", context);
   const result = JSON.parse(JSON.stringify(await call(args)));
   return { requests, logs, result };
@@ -63,6 +69,8 @@ async function main() {
         signal: new AbortController().signal,
         threadSource,
         voice: "unchanged voice",
+        backendModel: "backend-model",
+        backendThinkingEffort: "high-ź",
       };
       const native = await invoke(before, args);
       const patched = await invoke(after, args);

@@ -28,6 +28,13 @@ OWNERS = {
         },
     ),
 }
+# 26.1007.21434 moved both process composers into one shared build module.
+# Its added PR diff-link and inline artifact guidance stays byte-identical.
+SHARED = (
+    r"\.vite/build/src-[^/]+\.js",
+    OWNERS["bootstrap"][1],
+    {"31fe2ad572290eae3216c8a892cb929fab26aacc33a7480c50f7aec9e6602807"},
+)
 START = (
     r"function [\w$]+\(e\)\{return"
     + re.escape("`<app-context>\\n${e.trim()}\\n</app-context>`}var ")
@@ -58,8 +65,22 @@ SECTIONS = (
 
 def slim_defaults(bundle: Asar) -> dict[str, bytes]:
     replacements = {}
-    for owner, (path_pattern, end_pattern, fingerprints) in OWNERS.items():
-        path = packed_module(bundle, path_pattern)
+    shared = [
+        path for path in bundle.entries
+        if re.fullmatch(SHARED[0], path)
+        and re.search(START, bundle.read(path).decode("utf-8"))
+    ]
+    if len(shared) > 1:
+        raise UnsupportedBundle("desktop shared instruction owner is ambiguous")
+    if shared and any(
+        re.search(START, bundle.read(path).decode("utf-8"))
+        for path in bundle.entries
+        if any(re.fullmatch(spec[0], path) for spec in OWNERS.values())
+    ):
+        raise UnsupportedBundle("desktop shared and legacy instruction owners coexist")
+    owners = {"shared": SHARED} if shared else OWNERS
+    for owner, (path_pattern, end_pattern, fingerprints) in owners.items():
+        path = shared[0] if owner == "shared" else packed_module(bundle, path_pattern)
         source = bundle.read(path).decode("utf-8")
         starts = list(re.finditer(START, source))
         ends = list(re.finditer(end_pattern, source))

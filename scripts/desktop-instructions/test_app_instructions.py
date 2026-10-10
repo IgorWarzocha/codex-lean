@@ -12,6 +12,7 @@ from pathlib import Path
 
 import app_instructions
 import patch
+import regions
 from asar import Asar
 from git_update import PATCHER_SOURCES
 from test_patch import fixture
@@ -260,6 +261,48 @@ class AppInstructionsTests(unittest.TestCase):
                 self.assertEqual(files[BOOTSTRAP].count(original), 1)
                 files[BOOTSTRAP] = files[BOOTSTRAP].replace(original, changed)
                 self.assert_rejected_without_outputs(files)
+
+    def test_21434_shared_composer_and_native_voice_preserve_semantics(self):
+        capture = json.loads((HERE / "fixtures/linux-21434-instructions.json").read_text())
+        shared = ".vite/build/src-captured.js"
+        files = {key: value for key, value in self.files.items() if key not in (BOOTSTRAP, WORKER)}
+        files[shared] = capture["shared"].encode()
+        files[MAIN] = ("const e=require('original');class Owner{" + capture["text"] + "async isNonGitWorkspace(){}};").encode()
+        files[INITIAL] = (capture["rpc"] + capture["call"] + "var untouched=1;").encode()
+        fixture(self.source, files)
+        self.assertEqual(self.invoke("--check"), 0)
+        self.assertEqual(self.invoke("--output", str(self.output)), 0)
+        patched = Asar(self.output)
+        for script, payload, expected in (
+            ("test_app_instructions.cjs", {
+                "before": {"shared": capture["shared"]},
+                "after": {"shared": patched.read(shared).decode()},
+                "sections": [text for _, text in app_instructions.SECTIONS],
+            }, "1024 native composer comparisons passed"),
+            ("test_native_call.cjs", {
+                "before": capture["call"],
+                "after": patched.read(INITIAL).decode().split(regions.append_voice(regions.CodeRegion("rpc", capture["rpc"])))[1].split("var untouched=1;")[0],
+            }, "12 native call payload comparisons passed"),
+        ):
+            result = subprocess.run(["node", str(HERE / script)], input=json.dumps({**payload, "version": "21434"}), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(expected, result.stdout)
+        self.assertIn("return globalThis.__codexUserPersonality.append(await i.Wt(", patched.read(MAIN).decode())
+        self.output.unlink()
+        for owner, original, changed in (
+            (shared, b"n&&t?", b"n||t?"),
+            (shared, b"heartbeatEnabled:r!=null&&tI(r)", b"heartbeatEnabled:!1"),
+            (INITIAL, b"g.backend_model_name=e", b"g.backend_model_name=null"),
+            (MAIN, b"this.customInstructions?.read()", b"null"),
+        ):
+            with self.subTest(owner=owner, original=original):
+                drifted = dict(files)
+                self.assertEqual(drifted[owner].count(original), 1)
+                drifted[owner] = drifted[owner].replace(original, changed)
+                self.assert_rejected_without_outputs(drifted)
+        for extra in (".vite/build/src-duplicate.js", BOOTSTRAP):
+            with self.subTest(extra=extra):
+                self.assert_rejected_without_outputs({**files, extra: files[shared]})
 
     def test_unrelated_chunk_renames_are_allowed_but_multiple_bootstrap_candidates_reject(
         self,
