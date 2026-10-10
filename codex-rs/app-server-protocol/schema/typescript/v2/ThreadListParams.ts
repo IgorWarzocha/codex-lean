@@ -27,7 +27,6 @@ modelProviders?: Array<string> | null, /**
  */
 sourceKinds?: Array<ThreadSourceKind> | null, /**
  * Optional originator allowlist, matching any supplied value exactly.
- * Supported by hosted backends only; the local app-server rejects a nonempty list.
  * Omitted or empty lists leave originators unrestricted.
  */
 originators?: Array<string> | null, /**

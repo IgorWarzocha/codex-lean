@@ -76,6 +76,7 @@ async fn remove_pending_thread_metadata(
 
 struct ThreadListFilters {
     model_providers: Option<Vec<String>>,
+    originators: Option<Vec<String>>,
     source_kinds: Option<Vec<ThreadSourceKind>>,
     archived: bool,
     section_id: Option<Option<String>>,
@@ -2542,14 +2543,6 @@ impl ThreadRequestProcessor {
             parent_thread_id,
             ancestor_thread_id,
         } = params;
-        if originators
-            .as_ref()
-            .is_some_and(|values| !values.is_empty())
-        {
-            return Err(invalid_params(
-                "originator filtering is not supported by the local app-server",
-            ));
-        }
         if project_id.is_some() && !self.thread_store.supports_projects() {
             return Err(unsupported_thread_store_operation("projects"));
         }
@@ -2612,6 +2605,7 @@ impl ThreadRequestProcessor {
                 sort_direction,
                 ThreadListFilters {
                     model_providers,
+                    originators,
                     source_kinds,
                     archived: archived.unwrap_or(false),
                     section_id,
@@ -5475,6 +5469,7 @@ impl ThreadRequestProcessor {
     ) -> Result<(Vec<StoredThread>, Option<String>), JSONRPCErrorError> {
         let ThreadListFilters {
             model_providers,
+            originators,
             source_kinds,
             archived,
             section_id,
@@ -5513,6 +5508,9 @@ impl ThreadRequestProcessor {
             SortDirection::Desc => StoreSortDirection::Desc,
         };
 
+        // Apply originators in this refill loop so SQL and rollout-backed listings share
+        // exact matching before response pagination. Requesting only the remaining count
+        // keeps each underlying cursor after the last consumed row, without skipping matches.
         while remaining > 0 {
             let page_size = remaining.min(THREAD_LIST_MAX_LIMIT);
             let page = self
@@ -5542,7 +5540,12 @@ impl ThreadRequestProcessor {
                     it.agent_nickname.clone(),
                     it.agent_role.clone(),
                 );
-                if source_kind_filter
+                if originators.as_ref().is_none_or(|allowed| {
+                    allowed.is_empty()
+                        || it.originator.as_ref().is_some_and(|originator| {
+                            allowed.iter().any(|allowed| allowed == originator)
+                        })
+                }) && source_kind_filter
                     .as_ref()
                     .is_none_or(|filter| source_kind_matches(&source, filter))
                     && cwd_filters.as_ref().is_none_or(|expected_cwds| {

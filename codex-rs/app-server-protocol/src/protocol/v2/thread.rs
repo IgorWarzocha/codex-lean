@@ -1413,7 +1413,6 @@ pub struct ThreadListParams {
     #[ts(optional = nullable)]
     pub source_kinds: Option<Vec<ThreadSourceKind>>,
     /// Optional originator allowlist, matching any supplied value exactly.
-    /// Supported by hosted backends only; the local app-server rejects a nonempty list.
     /// Omitted or empty lists leave originators unrestricted.
     #[ts(optional = nullable)]
     pub originators: Option<Vec<String>>,

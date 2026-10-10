@@ -10151,7 +10151,7 @@ class ThreadListParams(BaseModel):
     originators: Annotated[
         list[str] | None,
         Field(
-            description="Optional originator allowlist, matching any supplied value exactly. Supported by hosted backends only; the local app-server rejects a nonempty list. Omitted or empty lists leave originators unrestricted."
+            description="Optional originator allowlist, matching any supplied value exactly. Omitted or empty lists leave originators unrestricted."
         ),
     ] = None
     search_term: Annotated[

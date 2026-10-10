@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
@@ -2672,40 +2673,128 @@ async fn thread_list_keeps_archived_threads_without_previews() -> Result<()> {
     Ok(())
 }
 
+#[test_case::test_case(false, false; "rollouts_active")]
+#[test_case::test_case(true, false; "state_db_active")]
+#[test_case::test_case(false, true; "rollouts_archived")]
+#[test_case::test_case(true, true; "state_db_archived")]
 #[tokio::test]
-async fn thread_list_rejects_originator_filter_but_accepts_empty_allowlist() -> Result<()> {
+async fn thread_list_filters_originators_before_pagination(
+    use_state_db_only: bool,
+    archived: bool,
+) -> Result<()> {
     let codex_home = TempDir::new()?;
     create_minimal_config(codex_home.path())?;
+    let originators = [
+        "codex_cloud",
+        "codex_work_desktop",
+        "codex_cloud",
+        "Codex_cloud",
+        "",
+        "codex_cloud",
+    ];
+    let mut ids = Vec::new();
+    for (index, originator) in originators.iter().enumerate() {
+        let (filename_ts, meta_rfc3339) = timestamp_at(2025, 3, 1, 9, index as u32, 0);
+        let id = create_fake_rollout(
+            codex_home.path(),
+            &filename_ts,
+            &meta_rfc3339,
+            "Originator filtering fixture",
+            Some("mock_provider"),
+            /*git_info*/ None,
+        )?;
+        let path = rollout_path(codex_home.path(), &filename_ts, &id);
+        let content = fs::read_to_string(&path)?;
+        let mut lines = content.lines();
+        let mut meta: serde_json::Value = serde_json::from_str(
+            lines
+                .next()
+                .context("rollout fixture must include session metadata")?,
+        )?;
+        meta["payload"]["originator"] = json!(originator);
+        fs::write(
+            &path,
+            format!("{meta}\n{}\n", lines.collect::<Vec<_>>().join("\n")),
+        )?;
+        if archived {
+            let archived_dir = codex_home.path().join(ARCHIVED_SESSIONS_SUBDIR);
+            fs::create_dir_all(&archived_dir)?;
+            fs::rename(
+                &path,
+                archived_dir.join(
+                    path.file_name()
+                        .context("rollout fixture must have a filename")?,
+                ),
+            )?;
+        }
+        ids.push(id);
+    }
     let mut mcp = init_mcp(codex_home.path()).await?;
-    let request_id = mcp
-        .send_thread_list_request(serde_json::from_value(json!({
-            "originators": ["future_client"]
-        }))?)
-        .await?;
-    let error = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+    // Backfill the same fixtures before checking the state-DB-only path.
+    let warmup = list_threads(
+        &mut mcp,
+        None,
+        Some(10),
+        Some(vec!["mock_provider".to_string()]),
+        None,
+        Some(archived),
     )
-    .await??;
-    assert_eq!(
-        (error.error.code, error.error.message),
+    .await?;
+    assert_eq!(warmup.data.len(), ids.len());
+    for (allowlist, matching_indexes) in [
+        (json!(["codex_cloud"]), vec![0, 2, 5]),
         (
-            -32602,
-            "originator filtering is not supported by the local app-server".to_string()
+            json!(["codex_cloud", "codex_work_desktop"]),
+            vec![0, 1, 2, 5],
         ),
-    );
-    for params in [
-        json!({}),
-        json!({"originators": null}),
-        json!({"originators": []}),
+        (json!(["future_client"]), vec![]),
+        (json!([""]), vec![]),
+        (json!(null), vec![0, 1, 2, 3, 4, 5]),
+        (json!([]), vec![0, 1, 2, 3, 4, 5]),
     ] {
-        let response: ThreadListResponse = mcp
-            .request(|request_id| ClientRequest::ThreadList {
-                request_id,
-                params: serde_json::from_value(params).expect("valid list params"),
-            })
-            .await?;
-        assert_eq!(response.data, Vec::new());
+        for sort_direction in ["asc", "desc"] {
+            let mut expected = matching_indexes
+                .iter()
+                .map(|&index| ids[index].clone())
+                .collect::<Vec<_>>();
+            if sort_direction == "desc" {
+                expected.reverse();
+            }
+            for limit in [1, 2] {
+                let mut cursor = None;
+                let mut found = Vec::new();
+                for _ in 0..=ids.len() {
+                    let response: ThreadListResponse = mcp
+                        .request(|request_id| ClientRequest::ThreadList {
+                            request_id,
+                            params: serde_json::from_value(json!({
+                                "originators": allowlist,
+                                "modelProviders": ["mock_provider"],
+                                "archived": archived,
+                                "useStateDbOnly": use_state_db_only,
+                                "sortKey": "created_at",
+                                "sortDirection": sort_direction,
+                                "limit": limit,
+                                "cursor": cursor,
+                            }))
+                            .expect("valid list params"),
+                        })
+                        .await?;
+                    assert!(response.data.len() <= limit);
+                    if response.next_cursor.is_some() {
+                        assert_eq!(response.data.len(), limit);
+                        assert_ne!(response.next_cursor, cursor);
+                    }
+                    found.extend(response.data.into_iter().map(|thread| thread.id));
+                    cursor = response.next_cursor;
+                    if cursor.is_none() {
+                        break;
+                    }
+                }
+                assert_eq!(cursor, None, "pagination must terminate");
+                assert_eq!(found, expected);
+            }
+        }
     }
     Ok(())
 }
