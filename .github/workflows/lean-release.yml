@@ -405,6 +405,13 @@ jobs:
       - name: Verify cache metadata preserved the locked dependency graph
         # The action invokes cargo metadata without --locked during restore.
         run: git diff --exit-code -- codex-rs/Cargo.lock
+      - name: Reconstruct V8 native archive after dependency cache restore
+        working-directory: codex-rs
+        run: |
+          set -euo pipefail
+          # rust-cache preserves V8 build metadata but prunes release/gn_out.
+          # Re-run the crate's build script using setup-rusty-v8's verified archive.
+          cargo clean -p v8 --release --target "$TARGET"
       - name: Finalize bwrap before compiling Codex
         if: runner.os == 'Linux'
         working-directory: codex-rs
