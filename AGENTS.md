@@ -1,0 +1,1 @@
+- Confirm changed behaviour locally before starting remote GitHub Actions builds. For backend changes, build Lean locally and exercise the affected desktop or CLI workflow with that new binary; unit tests or a launch against the previous installation do not satisfy this gate. If local confirmation is blocked, report the blocker rather than using Actions as a substitute.
