@@ -8,6 +8,7 @@ from asar import Asar, UnsupportedBundle
 
 
 LOCAL_ATTACHMENT_CLEANUP_TEXT = "f58882002e92218b5689a2303a21cb1e28aa8b7481c5e66518e8f08ea6b671b3"
+RENAMED_ATTACHMENT_CLEANUP_TEXT = "c4cae43b3c7d5814e5c4ec650df91e3283e4503971d36e5bda19204196d1a2d8"
 # The durable cloud manager has no host filesystem without a task environment.
 # Audit the entire startup owner, including registration and first invocation.
 ATTACHMENT_CLEANUP = (
@@ -28,6 +29,7 @@ FINGERPRINTS = {
         "4d1009145aafadfc653b2ba11a3f9be18d62e82f900d02a33aa05744abeffaf5",
         "f4d4bbe4aacdb97581292a06c3228ae92dcb8a3c3fd7ff89d29aeb59c555bbb8",
         LOCAL_ATTACHMENT_CLEANUP_TEXT,
+        RENAMED_ATTACHMENT_CLEANUP_TEXT,
     },
     "rpc": {"abdb4bc77855a4566b117625888c1dbcd40a33702953b205d2f5d1ab0a0e5269"},
     "call": {
@@ -37,6 +39,8 @@ FINGERPRINTS = {
         "2510228c0a4280c870f03ff92f218cb8cfc8fab254cf0e0c1d56315afcb893e9",
         "7ea4cdce4ae39c1d84fb86d95526ae9d2b33a385788ac7c4d48417df0a505fba",
         "e037b9f9bf7499bdb38d0b887a3b5f0fbcf1e9ec7d8465b6db96309a356c9ed1",
+        # Linux 26.1007.71326 only renames external bindings from 21434.
+        "1c7b2b6258b59e5c896b38382fca38ec8bac4fe32b7234e8cc18ed2e8937b375",
     },
 }
 MARKERS = ("codex-user-personality-v2", "codex-user-voice-prompt-v1")
@@ -135,7 +139,9 @@ def inspect_regions(bundle: Asar) -> BundleLayout:
 
 
 def skip_cloud_attachment_cleanup(source: str, text: CodeRegion) -> str:
-    if text.fingerprint != LOCAL_ATTACHMENT_CLEANUP_TEXT:
+    if text.fingerprint not in {
+        LOCAL_ATTACHMENT_CLEANUP_TEXT, RENAMED_ATTACHMENT_CLEANUP_TEXT
+    }:
         return source
     if source.count(ATTACHMENT_CLEANUP) != 1 or source.count(
         "cleanupPendingPastedTextAttachments().catch("

@@ -263,7 +263,13 @@ class AppInstructionsTests(unittest.TestCase):
                 self.assert_rejected_without_outputs(files)
 
     def test_21434_shared_composer_and_native_voice_preserve_semantics(self):
-        capture = json.loads((HERE / "fixtures/linux-21434-instructions.json").read_text())
+        self.check_shared_composer_and_native_voice("21434")
+
+    def test_71326_shared_composer_and_native_voice_preserve_semantics(self):
+        self.check_shared_composer_and_native_voice("71326")
+
+    def check_shared_composer_and_native_voice(self, version):
+        capture = json.loads((HERE / f"fixtures/linux-{version}-instructions.json").read_text())
         shared = ".vite/build/src-captured.js"
         files = {key: value for key, value in self.files.items() if key not in (BOOTSTRAP, WORKER)}
         files[shared] = capture["shared"].encode()
@@ -293,7 +299,7 @@ class AppInstructionsTests(unittest.TestCase):
                 ),
             }, "Native local and SSH cleanup preserved; environmentless cloud cleanup skipped"),
         ):
-            result = subprocess.run(["node", str(HERE / script)], input=json.dumps({**payload, "version": "21434"}), capture_output=True, text=True)
+            result = subprocess.run(["node", str(HERE / script)], input=json.dumps({**payload, "version": version}), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn(expected, result.stdout)
         self.assertIn("return globalThis.__codexUserPersonality.append(await i.Wt(", patched.read(MAIN).decode())

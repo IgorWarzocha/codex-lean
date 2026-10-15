@@ -6,7 +6,7 @@ const { before, after, sections, version } = JSON.parse(
   fs.readFileSync(0, "utf8"),
 );
 const symbols =
-  version === "21434"
+  version === "21434" || version === "71326"
     ? { shared: { boundary: "var dG=", defaults: ["WW", "YW", "ZW"], compose: "uG(options)" } }
     : version === "61225"
     ? {

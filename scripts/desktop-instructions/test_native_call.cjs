@@ -42,6 +42,12 @@ async function invoke(source, args) {
       Zdc: context.D9s, ec: context.eg,
     });
   }
+  if (version === "71326") {
+    Object.assign(context, {
+      Qa: context.Kp, Bg: context.Zm, Qdc: 256,
+      Zdc: context.D9s, Qs: context.eg,
+    });
+  }
   const call = vm.runInNewContext("(" + source + ")", context);
   const result = JSON.parse(JSON.stringify(await call(args)));
   return { requests, logs, result };
