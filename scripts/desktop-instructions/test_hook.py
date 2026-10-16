@@ -13,7 +13,6 @@ from unittest.mock import patch as mock_patch
 
 import install_hook
 import pacman_hook
-import regions
 from asar import Asar, UnsupportedBundle
 from test_patch import (
     APP_INSTRUCTION_FILES,
@@ -55,13 +54,6 @@ class HookTests(unittest.TestCase):
             "untouched": b"native tools and transport",
         }
         fixture(self.archive, self.files)
-        fingerprints = {
-            kind: {regions.CodeRegion(kind, source).fingerprint}
-            for kind, source in (("text", TEXT), ("rpc", RPC), ("call", CALL))
-        }
-        trust = mock_patch.object(regions, "FINGERPRINTS", fingerprints)
-        self.addCleanup(trust.stop)
-        trust.start()
 
     def invoke(self):
         return pacman_hook.main(
@@ -102,7 +94,7 @@ class HookTests(unittest.TestCase):
 
     def test_incompatible_update_stays_pristine_warns_and_returns_success(self):
         self.files[MAIN] = self.files[MAIN].replace(
-            b"baseInstructions:e", b"baseInstructions:changed"
+            b"getProjectAwareDeveloperInstructions", b"missingInstructionsOwner"
         )
         fixture(self.archive, self.files)
         before = self.archive.read_bytes()

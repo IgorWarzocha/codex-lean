@@ -1,62 +1,18 @@
-"""Verify audited native code boundaries before desktop transformations."""
+"""Locate instruction edit boundaries without approving particular app builds."""
 
-import hashlib
 import re
 from dataclasses import dataclass
 
 from asar import Asar, UnsupportedBundle
 
-
-LOCAL_ATTACHMENT_CLEANUP_TEXT = "f58882002e92218b5689a2303a21cb1e28aa8b7481c5e66518e8f08ea6b671b3"
-RENAMED_ATTACHMENT_CLEANUP_TEXT = "c4cae43b3c7d5814e5c4ec650df91e3283e4503971d36e5bda19204196d1a2d8"
-# The durable cloud manager has no host filesystem without a task environment.
-# Audit the entire startup owner, including registration and first invocation.
-ATTACHMENT_CLEANUP = (
-    "let C=()=>{for(let e of s.getAll()){let t=s.getImplForHostId(e.getHostId());"
-    "t==null||S.current.has(t)||(S.current.add(t),"
-    "t.cleanupPendingPastedTextAttachments().catch(Isc))}},"
-    "w=s.addRegistryCallback(C);return C(),"
-)
-
-
-# Captured from Linux 26.930.21537, 26.930.31730, 26.930.41038, 26.930.61225,
-# and macOS 26.930.31730. The later Linux calls only rename minifier identifiers.
-# These are code-region fingerprints, not copied prompts or protocol schemas.
-# Linux 26.1007.21434 keeps text composition and RPC semantics; its native
-# call adds backend model/effort metadata and renames the prompt binding to o.
-FINGERPRINTS = {
-    "text": {
-        "4d1009145aafadfc653b2ba11a3f9be18d62e82f900d02a33aa05744abeffaf5",
-        "f4d4bbe4aacdb97581292a06c3228ae92dcb8a3c3fd7ff89d29aeb59c555bbb8",
-        LOCAL_ATTACHMENT_CLEANUP_TEXT,
-        RENAMED_ATTACHMENT_CLEANUP_TEXT,
-    },
-    "rpc": {"abdb4bc77855a4566b117625888c1dbcd40a33702953b205d2f5d1ab0a0e5269"},
-    "call": {
-        "12f0d6dcb290fbae55dbbc7318aa929543c959e51976019d3ac46eae26ff0b75",
-        "c16e4cecfbf7e2fda56de3fea0bf6d3479c3d50568966e1ba8f6c0590a9a75b4",
-        "efb9d9140960a8d048c48502c3d30060e797e116a9056314a7a29e1c74acf3bf",
-        "2510228c0a4280c870f03ff92f218cb8cfc8fab254cf0e0c1d56315afcb893e9",
-        "7ea4cdce4ae39c1d84fb86d95526ae9d2b33a385788ac7c4d48417df0a505fba",
-        "e037b9f9bf7499bdb38d0b887a3b5f0fbcf1e9ec7d8465b6db96309a356c9ed1",
-        # Linux 26.1007.71326 only renames external bindings from 21434.
-        "1c7b2b6258b59e5c896b38382fca38ec8bac4fe32b7234e8cc18ed2e8937b375",
-    },
-}
 MARKERS = ("codex-user-personality-v2", "codex-user-voice-prompt-v1")
+IDENTIFIER = r"[A-Za-z_$][\w$]*"
 
 
 @dataclass(frozen=True)
 class CodeRegion:
     kind: str
     source: str
-
-    @property
-    def fingerprint(self) -> str:
-        canonical = re.sub(
-            r"^async function [\w$]+", "async function FUNCTION", self.source
-        )
-        return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -79,20 +35,133 @@ def packed_module(bundle: Asar, pattern: str) -> str:
     return paths[0]
 
 
-def extract(source: str, kind: str, start_pattern: str, end_marker: str) -> CodeRegion:
+def quoted_end(source: str, start: int) -> int:
+    quote = source[start]
+    index = start + 1
+    while index < len(source):
+        if source[index] == "\\":
+            index += 2
+        elif source[index] == quote:
+            return index + 1
+        elif quote == "`" and source.startswith("${", index):
+            index = group_end(source, index + 1)
+        else:
+            index += 1
+    raise UnsupportedBundle("unterminated JavaScript literal at instruction boundary")
+
+
+def group_end(source: str, start: int) -> int:
+    """Skip a balanced minified JS group, including templates and regex literals."""
+    closing = {"(": ")", "[": "]", "{": "}"}[source[start]]
+    index = start + 1
+    expression = True
+    previous_word = None
+    while index < len(source):
+        char = source[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char == closing:
+            return index + 1
+        if char in ")]}":
+            raise UnsupportedBundle("unbalanced JavaScript instruction boundary")
+        if source.startswith("//", index):
+            end = source.find("\n", index + 2)
+            index = len(source) if end == -1 else end + 1
+            continue
+        if source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            if end == -1:
+                break
+            index = end + 2
+            continue
+        if char in "\"'`":
+            index = quoted_end(source, index)
+            expression = False
+            previous_word = None
+            continue
+        if char == "/" and expression:
+            # Regex character classes may contain braces and slashes.
+            index += 1
+            in_class = False
+            while index < len(source):
+                token = source[index]
+                index += 1
+                if token == "\\":
+                    index += 1
+                elif token == "[":
+                    in_class = True
+                elif token == "]":
+                    in_class = False
+                elif token == "/" and not in_class:
+                    break
+            else:
+                break
+            expression = False
+            previous_word = None
+            continue
+        if char in "([{":
+            index = group_end(source, index)
+            expression = char == "(" and previous_word in {
+                "if",
+                "while",
+                "for",
+                "with",
+                "switch",
+                "catch",
+            }
+            previous_word = None
+            continue
+        word = re.match(IDENTIFIER + r"|\d+(?:\.\d+)?", source[index:])
+        if word:
+            expression = word[0] in {
+                "return",
+                "throw",
+                "case",
+                "void",
+                "typeof",
+                "delete",
+                "yield",
+                "await",
+                "in",
+                "of",
+                "instanceof",
+                "new",
+            }
+            previous_word = word[0]
+            index += len(word[0])
+        else:
+            expression = char not in "."
+            previous_word = None
+            index += 1
+    raise UnsupportedBundle("unterminated JavaScript instruction boundary")
+
+
+def body_start(source: str, start: int = 0) -> int:
+    opening = source.find("(", start)
+    if opening == -1:
+        raise UnsupportedBundle("native instruction parameters missing")
+    boundary = group_end(source, opening)
+    while boundary < len(source) and source[boundary].isspace():
+        boundary += 1
+    if boundary >= len(source) or source[boundary] != "{":
+        raise UnsupportedBundle("native instruction function body missing")
+    return boundary
+
+
+def extract(source: str, kind: str, start_pattern: str) -> CodeRegion:
     starts = list(re.finditer(start_pattern, source))
     if len(starts) != 1:
         raise UnsupportedBundle(f"native {kind} instruction owner missing or ambiguous")
     start = starts[0].start()
-    end = source.find(end_marker, starts[0].end())
-    if end == -1:
-        raise UnsupportedBundle(f"native {kind} instruction boundary is unfamiliar")
-    region = CodeRegion(kind, source[start:end])
-    if region.fingerprint not in FINGERPRINTS[kind]:
-        raise UnsupportedBundle(
-            f"unfamiliar native {kind} instruction code ({region.fingerprint})"
-        )
-    return region
+    end = group_end(source, body_start(source, start))
+    return CodeRegion(kind, source[start:end])
+
+
+def parameter(source: str, name: str) -> str | None:
+    header = source[: body_start(source)]
+    match = re.search(rf"(?:\{{|,)\s*{name}:({IDENTIFIER})(?=[,=}}])", header)
+    return match[1] if match else None
 
 
 def inspect_regions(bundle: Asar) -> BundleLayout:
@@ -106,74 +175,119 @@ def inspect_regions(bundle: Asar) -> BundleLayout:
         marker in source for source in (main, initial, preload) for marker in MARKERS
     ):
         raise UnsupportedBundle("bundle is already patched; use an unpatched archive")
-    if not main.startswith("const e=require("):
+    if not re.match(rf"const {IDENTIFIER}=require\(", main):
         raise UnsupportedBundle("unsupported main-process module")
     if (
-        not preload.startswith('let e=require("electron");')
-        or preload.count("contextBridge.exposeInMainWorld(`electronBridge`,z)") != 1
+        not re.match(rf'let {IDENTIFIER}=require\("electron"\);', preload)
+        or len(
+            re.findall(
+                rf"contextBridge\.exposeInMainWorld\(`electronBridge`,{IDENTIFIER}\)",
+                preload,
+            )
+        )
+        != 1
     ):
         raise UnsupportedBundle("unsupported sandboxed preload bridge")
-    text = extract(
-        main,
-        "text",
-        r"async getProjectAwareDeveloperInstructions\(",
-        "async isNonGitWorkspace(",
-    )
+    text = extract(main, "text", r"async getProjectAwareDeveloperInstructions\(")
+    # Parameter order, local variable names, models and metadata are not gates.
+    header = rf"async function {IDENTIFIER}\(\{{"
     rpc = extract(
         initial,
         "rpc",
-        r"async function [\w$]+\(\{codexResponseHandoffPrefix:e=",
-        "async function",
+        header
+        + r"(?=[^{}]*\bmanager:)(?=[^{}]*\bcodexResponsesAsItems:|[^{}]*\bcodexResponseHandoffPrefix:)",
     )
     call = extract(
-        initial,
-        "call",
-        r"async function [\w$]+\(\{(?:"
-        r"codexSessionId:e,conversationId:t,initialItems:n,offerSdp:r,prompt:i,|"
-        r"backendModel:e,backendThinkingEffort:t,codexSessionId:n,conversationId:r,"
-        r"initialItems:i,offerSdp:a,prompt:o,)",
-        "var ",
+        initial, "call", header + r"(?=[^{}]*\bofferSdp:)(?=[^{}]*\bprompt:)"
     )
+    if "`thread/realtime/start`" not in rpc.source:
+        raise UnsupportedBundle("native realtime start request missing")
+    if "/wham/realtime/calls" not in call.source:
+        raise UnsupportedBundle("native realtime call endpoint missing")
+    # --check exercises exactly the same boundary validation as writing.
+    append_text(text)
+    append_voice(rpc)
+    append_voice(call)
     skip_cloud_attachment_cleanup(initial, text)
     return BundleLayout(main_path, preload_path, initial_path, text, rpc, call)
 
 
 def skip_cloud_attachment_cleanup(source: str, text: CodeRegion) -> str:
-    if text.fingerprint not in {
-        LOCAL_ATTACHMENT_CLEANUP_TEXT, RENAMED_ATTACHMENT_CLEANUP_TEXT
-    }:
-        return source
-    if source.count(ATTACHMENT_CLEANUP) != 1 or source.count(
-        "cleanupPendingPastedTextAttachments().catch("
-    ) != 1:
-        raise UnsupportedBundle("attachment cleanup owner missing or unfamiliar")
-    guarded = ATTACHMENT_CLEANUP.replace(
-        "for(let e of s.getAll()){",
-        "for(let e of s.getAll()){if(e.getHostId()===`durable`)continue;",
+    # This fix owns only the registry startup loop, not text instructions.
+    pattern = (
+        rf"let (?P<callback>{IDENTIFIER})=\(\)=>\{{for\(let (?P<host>{IDENTIFIER}) of "
+        rf"(?P<registry>{IDENTIFIER})\.getAll\(\)\)\{{let (?P<impl>{IDENTIFIER})="
+        r"(?P=registry)\.getImplForHostId\((?P=host)\.getHostId\(\)\);"
+        rf"(?P=impl)==null\|\|(?P<seen>{IDENTIFIER})\.current\.has\((?P=impl)\)\|\|"
+        r"\((?P=seen)\.current\.add\((?P=impl)\),"
+        rf"(?P=impl)\.cleanupPendingPastedTextAttachments\(\)\.catch\({IDENTIFIER}\)\)\}}\}},"
+        rf"{IDENTIFIER}=(?P=registry)\.addRegistryCallback\((?P=callback)\);return (?P=callback)\(\),"
     )
-    return source.replace(ATTACHMENT_CLEANUP, guarded)
+    matches = list(re.finditer(pattern, source))
+    if not matches and "cleanupPendingPastedTextAttachments().catch(" not in source:
+        return source
+    if len(matches) != 1:
+        raise UnsupportedBundle("attachment cleanup owner missing or ambiguous")
+    match = matches[0]
+    loop = match[0]
+    boundary = loop.index("{let ") + 1
+    guarded = (
+        loop[:boundary]
+        + f"if({match['host']}.getHostId()===`durable`)continue;"
+        + loop[boundary:]
+    )
+    return source[: match.start()] + guarded + source[match.end() :]
 
 
 def append_text(region: CodeRegion) -> str:
-    prefix, expression = region.source.rsplit("return ", 1)
+    boundary = body_start(region.source)
+    if group_end(region.source, boundary) != len(region.source):
+        raise UnsupportedBundle("native text method body missing")
+    # Preserve every native return and lexical this/arguments, including callbacks.
     return (
-        prefix
-        + "return globalThis.__codexUserPersonality.append(await "
-        + expression[:-1]
-        + ")}"
+        region.source[: boundary + 1]
+        + "return globalThis.__codexUserPersonality.append(await (async()=>{"
+        + region.source[boundary + 1 : -1]
+        + "})())}"
     )
 
 
 def append_voice(region: CodeRegion) -> str:
+    prompt = parameter(region.source, "prompt")
     if region.kind == "rpc":
-        return region.source.replace(
-            "...s==null?{}:{prompt:s}",
-            "...s==null?{}:{prompt:globalThis.codexUserPersonality.append(s)}",
+        if prompt is None:
+            # New clients create the call themselves; this RPC only attaches it.
+            if re.search(
+                r"transport:\{type:`existingCall`,callId:" + IDENTIFIER + r"\}",
+                region.source,
+            ) and not re.search(r"\bprompt\s*:", region.source):
+                return region.source
+            raise UnsupportedBundle(
+                "native realtime prompt or existing-call attachment missing"
+            )
+        target = (
+            rf"\.\.\.{re.escape(prompt)}==null\?\{{\}}:\{{prompt:{re.escape(prompt)}\}}"
         )
-    prompt = "o" if "{backendModel:e," in region.source else "i"
-    native = f"instructions:{prompt}"
-    if region.source.count(native) != 2:
-        raise UnsupportedBundle("native call prompt boundaries are unfamiliar")
-    return region.source.replace(
-        native, f"instructions:globalThis.codexUserPersonality.append({prompt})"
+        if len(re.findall(target, region.source)) != 1:
+            raise UnsupportedBundle(
+                "native realtime prompt boundary missing or ambiguous"
+            )
+        return re.sub(
+            target,
+            f"...{prompt}==null?{{}}:{{prompt:globalThis.codexUserPersonality.append({prompt})}}",
+            region.source,
+        )
+    if prompt is None:
+        raise UnsupportedBundle("native call prompt parameter missing")
+    target = rf"\binstructions:{re.escape(prompt)}(?=[,}}])"
+    if not re.search(target, region.source) or len(
+        re.findall(target, region.source)
+    ) != len(re.findall(r"\binstructions:", region.source)):
+        raise UnsupportedBundle(
+            "native call instruction boundary missing or inconsistent"
+        )
+    return re.sub(
+        target,
+        f"instructions:globalThis.codexUserPersonality.append({prompt})",
+        region.source,
     )

@@ -17,7 +17,6 @@ from asar import Asar
 from git_update import PATCHER_SOURCES
 from test_patch import fixture
 
-
 HERE = Path(__file__).resolve().parent
 CAPTURE = json.loads((HERE / "fixtures/linux-31730-instructions.json").read_text())
 BOOTSTRAP = ".vite/build/bootstrap-captured.js"
@@ -176,15 +175,24 @@ class AppInstructionsTests(unittest.TestCase):
                 ],
             )
 
-    def test_malformed_duplicate_missing_or_drifted_owners_reject_without_partial_outputs(
+    def assert_only_default_literals_change(self, files):
+        fixture(self.source, files)
+        transformed = app_instructions.slim_defaults(Asar(self.source))
+        for owner, actual in transformed.items():
+            expected = files[owner].decode()
+            for pattern, text in app_instructions.SECTIONS:
+                expected, count = re.subn(
+                    pattern, lambda _, text=text: json.dumps(text), expected
+                )
+                self.assertEqual(count, 1)
+            self.assertEqual(actual, expected.encode())
+
+    def test_malformed_duplicate_or_missing_targets_reject_without_partial_outputs(
         self,
     ):
         mutations = {
             "missing": lambda files, owner: files.pop(owner),
             "duplicate": lambda files, owner: files.update({owner: files[owner] * 2}),
-            "literal drift": lambda files, owner: files.update(
-                {owner: files[owner].replace(b"Do not download", b"Allow download", 1)}
-            ),
             "malformed literal": lambda files, owner: files.update(
                 {
                     owner: files[owner].replace(
@@ -192,8 +200,33 @@ class AppInstructionsTests(unittest.TestCase):
                     )
                 }
             ),
-            "composer drift": lambda files, owner: files.update(
-                {owner: files[owner].replace(b"n&&t?", b"n||t?", 1)}
+            "missing literal": lambda files, owner: files.update(
+                {
+                    owner: files[owner].replace(
+                        b"### Thread Coordination", b"### Other", 1
+                    )
+                }
+            ),
+            "duplicate literal": lambda files, owner: files.update(
+                {owner: files[owner] + b"var duplicate='### Thread Coordination';"}
+            ),
+            "concatenation": lambda files, owner: files.update(
+                {
+                    owner: files[owner].replace(
+                        b"### Thread Coordination",
+                        b"'+other+'### Thread Coordination",
+                        1,
+                    )
+                }
+            ),
+            "interpolation": lambda files, owner: files.update(
+                {
+                    owner: files[owner].replace(
+                        b"# Codex desktop context",
+                        b"# Codex desktop context ${dynamic}",
+                        1,
+                    )
+                }
             ),
         }
         for owner in (BOOTSTRAP, WORKER):
@@ -203,7 +236,19 @@ class AppInstructionsTests(unittest.TestCase):
                     mutate(files, owner)
                     self.assert_rejected_without_outputs(files)
 
-    def test_61225_native_call_accepts_only_audited_code_and_preserves_payloads(self):
+    def test_changed_default_prose_and_inner_composers_are_preserved(self):
+        for owner in (BOOTSTRAP, WORKER):
+            for original, changed in (
+                (b"Do not download", b"Never fetch"),
+                (b"n&&t?", b"n||t?"),
+            ):
+                with self.subTest(owner=owner, original=original):
+                    files = dict(self.files)
+                    self.assertEqual(files[owner].count(original), 1)
+                    files[owner] = files[owner].replace(original, changed)
+                    self.assert_only_default_literals_change(files)
+
+    def test_61225_native_call_preserves_payloads_and_composer_drift(self):
         capture = json.loads(
             (HERE / "fixtures/linux-61225-instructions.json").read_text()
         )
@@ -243,9 +288,9 @@ class AppInstructionsTests(unittest.TestCase):
                 drifted = dict(files)
                 self.assertEqual(drifted[owner].count(original), 1)
                 drifted[owner] = drifted[owner].replace(original, changed)
-                self.assert_rejected_without_outputs(drifted)
+                self.assert_only_default_literals_change(drifted)
 
-    def test_outer_bootstrap_composer_drift_rejects_without_partial_outputs(self):
+    def test_outer_bootstrap_composer_drift_is_preserved_byte_for_byte(self):
         mutations = (
             (
                 b"mR({instructionOverrides:n,sidebarSectionToolsEnabled:a",
@@ -260,7 +305,7 @@ class AppInstructionsTests(unittest.TestCase):
                 files = dict(self.files)
                 self.assertEqual(files[BOOTSTRAP].count(original), 1)
                 files[BOOTSTRAP] = files[BOOTSTRAP].replace(original, changed)
-                self.assert_rejected_without_outputs(files)
+                self.assert_only_default_literals_change(files)
 
     def test_21434_shared_composer_and_native_voice_preserve_semantics(self):
         self.check_shared_composer_and_native_voice("21434")
@@ -268,41 +313,114 @@ class AppInstructionsTests(unittest.TestCase):
     def test_71326_shared_composer_and_native_voice_preserve_semantics(self):
         self.check_shared_composer_and_native_voice("71326")
 
+    def test_31256_client_owned_voice_and_text_preserve_native_semantics(self):
+        capture = json.loads(
+            (HERE / "fixtures/linux-31256-instructions.json").read_text()
+        )
+        text = regions.append_text(regions.CodeRegion("text", capture["text"]))
+        # The wrapper must contain the native method body byte-for-byte, not
+        # reconstruct a particular composer's parameters or return expression.
+        self.assertIn(capture["text"].split("){", 1)[1][:-1], text)
+        rpc = regions.append_voice(regions.CodeRegion("rpc", capture["rpc"]))
+        self.assertEqual(rpc, capture["rpc"])
+        call = regions.append_voice(regions.CodeRegion("call", capture["call"]))
+        result = subprocess.run(
+            ["node", str(HERE / "test_native_call.cjs")],
+            input=json.dumps(
+                {
+                    "version": "31256",
+                    "before": capture["call"],
+                    "after": call,
+                    "text": {"before": capture["text"], "after": text},
+                    "rpc": {"before": capture["rpc"], "after": rpc},
+                }
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for expected in (
+            "12 native call payload comparisons passed",
+            "Existing-call RPC unchanged",
+            "8 native text composer comparisons passed",
+        ):
+            self.assertIn(expected, result.stdout)
+
     def check_shared_composer_and_native_voice(self, version):
-        capture = json.loads((HERE / f"fixtures/linux-{version}-instructions.json").read_text())
+        capture = json.loads(
+            (HERE / f"fixtures/linux-{version}-instructions.json").read_text()
+        )
         shared = ".vite/build/src-captured.js"
-        files = {key: value for key, value in self.files.items() if key not in (BOOTSTRAP, WORKER)}
+        files = {
+            key: value
+            for key, value in self.files.items()
+            if key not in (BOOTSTRAP, WORKER)
+        }
         files[shared] = capture["shared"].encode()
-        files[MAIN] = ("const e=require('original');class Owner{" + capture["text"] + "async isNonGitWorkspace(){}};").encode()
+        files[MAIN] = (
+            "const e=require('original');class Owner{"
+            + capture["text"]
+            + "async isNonGitWorkspace(){}};"
+        ).encode()
         files[INITIAL] = (
-            capture["rpc"] + capture["call"] + "var untouched=1;"
-            + "function capturedCleanup(){" + capture["cleanup"] + "0;}"
+            capture["rpc"]
+            + capture["call"]
+            + "var untouched=1;"
+            + "function capturedCleanup(){"
+            + capture["cleanup"]
+            + "0;}"
         ).encode()
         fixture(self.source, files)
         self.assertEqual(self.invoke("--check"), 0)
         self.assertEqual(self.invoke("--output", str(self.output)), 0)
         patched = Asar(self.output)
         for script, payload, expected in (
-            ("test_app_instructions.cjs", {
-                "before": {"shared": capture["shared"]},
-                "after": {"shared": patched.read(shared).decode()},
-                "sections": [text for _, text in app_instructions.SECTIONS],
-            }, "1024 native composer comparisons passed"),
-            ("test_native_call.cjs", {
-                "before": capture["call"],
-                "after": patched.read(INITIAL).decode().split(regions.append_voice(regions.CodeRegion("rpc", capture["rpc"])))[1].split("var untouched=1;")[0],
-            }, "12 native call payload comparisons passed"),
-            ("test_attachment_cleanup.cjs", {
-                "before": capture["cleanup"],
-                "after": regions.skip_cloud_attachment_cleanup(
-                    capture["cleanup"], regions.CodeRegion("text", capture["text"])
-                ),
-            }, "Native local and SSH cleanup preserved; environmentless cloud cleanup skipped"),
+            (
+                "test_app_instructions.cjs",
+                {
+                    "before": {"shared": capture["shared"]},
+                    "after": {"shared": patched.read(shared).decode()},
+                    "sections": [text for _, text in app_instructions.SECTIONS],
+                },
+                "1024 native composer comparisons passed",
+            ),
+            (
+                "test_native_call.cjs",
+                {
+                    "before": capture["call"],
+                    "after": patched.read(INITIAL)
+                    .decode()
+                    .split(
+                        regions.append_voice(regions.CodeRegion("rpc", capture["rpc"]))
+                    )[1]
+                    .split("var untouched=1;")[0],
+                },
+                "12 native call payload comparisons passed",
+            ),
+            (
+                "test_attachment_cleanup.cjs",
+                {
+                    "before": capture["cleanup"],
+                    "after": regions.skip_cloud_attachment_cleanup(
+                        capture["cleanup"], regions.CodeRegion("text", capture["text"])
+                    ),
+                },
+                "Native local and SSH cleanup preserved; environmentless cloud cleanup skipped",
+            ),
         ):
-            result = subprocess.run(["node", str(HERE / script)], input=json.dumps({**payload, "version": version}), capture_output=True, text=True)
+            result = subprocess.run(
+                ["node", str(HERE / script)],
+                input=json.dumps({**payload, "version": version}),
+                capture_output=True,
+                text=True,
+            )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn(expected, result.stdout)
-        self.assertIn("return globalThis.__codexUserPersonality.append(await i.Wt(", patched.read(MAIN).decode())
+        self.assertIn(
+            "return globalThis.__codexUserPersonality.append(await ",
+            patched.read(MAIN).decode(),
+        )
         self.output.unlink()
         for owner, original, changed in (
             (shared, b"n&&t?", b"n||t?"),
@@ -315,7 +433,7 @@ class AppInstructionsTests(unittest.TestCase):
                 drifted = dict(files)
                 self.assertEqual(drifted[owner].count(original), 1)
                 drifted[owner] = drifted[owner].replace(original, changed)
-                self.assert_rejected_without_outputs(drifted)
+                self.assert_only_default_literals_change(drifted)
         for extra in (".vite/build/src-duplicate.js", BOOTSTRAP):
             with self.subTest(extra=extra):
                 self.assert_rejected_without_outputs({**files, extra: files[shared]})

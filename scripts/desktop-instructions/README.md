@@ -2,7 +2,7 @@
 
 An ASAR patch that shortens selected default desktop text guidance and appends your communication preferences to **Codex desktop's native text and realtime voice instructions**. Native tool handoffs and realtime prompts remain intact. Python 3.10 or newer is required, without additional packages.
 
-The patcher writes separate artifacts. It never installs them, changes its inputs, or overwrites existing outputs. An optional Linux hook reapplies the patch after package updates. Compatibility is checked against the specific native instruction code it edits, not the app version or whole-archive hash. Unrelated code changes and renamed bundle chunks are allowed. Unfamiliar instruction code, ambiguous owners, and already-patched archives are rejected.
+The patcher writes separate artifacts. It never installs them, changes its inputs, or overwrites existing outputs. An optional Linux hook reapplies the patch after package updates. Compatibility checks locate the instruction edit boundaries, without version lists or function hashes. Changed native function bodies, renamed local bindings and renamed bundle chunks are allowed. Missing or ambiguous edit boundaries and already-patched archives are rejected.
 
 ## Prepare a patched archive
 
@@ -29,11 +29,11 @@ A missing default file or an empty file adds nothing. An existing unreadable fil
 
 Every patch run shortens the default media, thread coordination, and sidebar sections. There is no separate flag. All native instruction owners are checked before writing anything, including during `--check`.
 
-Only verified default string literals change, not the composed instructions. User preferences, instruction overrides, Git settings, feature flags, projectless paths, LaTeX guidance, and other native sections remain intact. Native realtime instructions and the personality append behavior are unchanged. Missing, ambiguous, malformed, or unfamiliar default instructions or composers reject the entire patch rather than falling back to personality-only output.
+Only isolated default string literals change, not their composers. User preferences, instruction overrides, Git settings, feature flags, projectless paths, LaTeX guidance, and other native sections remain intact. Changed default prose and composer code do not require approval. Missing, ambiguous or malformed literal boundaries reject the patch rather than guessing where to edit.
 
-The complete patch has been validated offline against Linux 26.930.31730, 26.930.41038, 26.930.61225, 26.1007.21434 and 26.1007.71326. The 26.1007.21434 audit covers its shared desktop instruction composer and updated voice call boundaries. The 26.1007.71326 audit confirms unchanged semantics with renamed internal bindings. Native PR diff links, artifact follow-ups and backend model and thinking-effort metadata remain intact. Other releases and macOS need their instruction boundaries audited before they can be supported. Compatibility follows the checked code boundaries, not the version label.
+Captured native instruction functions cover Linux 26.930.31730, 26.930.61225, 26.1007.21434, 26.1007.71326 and 26.1013.31256. The latest release uses one client-owned voice call path and a promptless existing-call attachment RPC. Tests preserve its model, SDP, metadata, native instructions and attachment request. New releases can pass automatically when their edit boundaries remain recognisable. This is not a guarantee that every future request architecture is supported.
 
-On Linux 26.1007.21434 and 26.1007.71326, the patch also prevents startup attachment cleanup from running against the durable cloud manager, which has no filesystem without a task environment. Local and SSH attachment cleanup continues unchanged. Cloud file requests still require their environment ID; that validation is not bypassed. The startup cleanup owner is checked before writing, including during `--check`.
+Where the native registry startup loop is present, the patch also prevents attachment cleanup from running against the durable cloud manager, which has no filesystem without a task environment. Local and SSH attachment cleanup continues unchanged. Cloud file requests still require their environment ID. Only this cleanup boundary is checked, independently of text composition, including during `--check`.
 
 ## macOS
 
@@ -107,7 +107,7 @@ The bootstrap and worker default instruction owners receive the same shorter med
 
 The main process appends a `<user_communication_preferences>` block after the result of `getProjectAwareDeveloperInstructions`. The block identifies the text as the user's preferred communication style, subordinate to native instructions, safety requirements, and tool handoffs.
 
-For voice, a narrow preload bridge supplies the same block to the native `thread/realtime/start` prompt and the client-owned `/wham/realtime/calls` instructions. Both keep the native prompt as an unchanged prefix. Existing-call attachment keeps its native handoff request unchanged. No bundled consumer ChatGPT wingman override is modified.
+For voice, a narrow preload bridge supplies the same block to the client-owned `/wham/realtime/calls` instructions and, on releases that send one, the native `thread/realtime/start` prompt. The prompt binding is discovered from the native function parameters. Native instructions remain an unchanged prefix. Existing-call attachment keeps its native handoff request unchanged. No bundled consumer ChatGPT wingman override is modified.
 
 The renderer can request only the configured file. Access is restricted to the app's top-level `app://-` frames. Native routing, authentication, SDP, WebRTC, tools, delegation, and handoff fields remain unchanged. The runtime does not duplicate native realtime prompts or tool schemas. Tests include captured desktop instruction-owner fragments.
 

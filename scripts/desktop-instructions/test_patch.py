@@ -9,12 +9,10 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch as mock_patch
 
 import patch
 import regions
 from asar import Asar, UnsupportedBundle
-
 
 MAIN = ".vite/build/main-test.js"
 PRELOAD = ".vite/build/preload.js"
@@ -28,7 +26,7 @@ RPC = (
 )
 CALL = (
     "async function nativeCall({codexSessionId:e,conversationId:t,initialItems:n,offerSdp:r,prompt:i,realtimeSessionOverrides:o})"
-    "{return o?{instructions:i}:{instructions:i}}"
+    "{let endpoint=`/wham/realtime/calls`;return o?{instructions:i}:{instructions:i}}"
 )
 CAPTURE = json.loads(
     (patch.HERE / "fixtures/linux-31730-instructions.json").read_text()
@@ -111,14 +109,6 @@ class PatcherTests(unittest.TestCase):
         ):
             return patch.main(["--asar", str(self.source), *arguments])
 
-    def trust_fixture(self):
-        # Synthetic archives exercise our decisions, not external compatibility.
-        fingerprints = {
-            kind: {regions.CodeRegion(kind, source).fingerprint}
-            for kind, source in (("text", TEXT), ("rpc", RPC), ("call", CALL))
-        }
-        return mock_patch.object(regions, "FINGERPRINTS", fingerprints)
-
     def test_archive_round_trip_preserves_original_entries_and_rehashes_changed_blocks(
         self,
     ):
@@ -148,13 +138,12 @@ class PatcherTests(unittest.TestCase):
     ):
         before = self.source.read_bytes()
         prompt = self.directory / 'not-yet-created-"${literal}`.md'
-        with self.trust_fixture():
-            self.assertEqual(
-                self.run_cli(
-                    "--personality-file", str(prompt), "--output", str(self.output)
-                ),
-                0,
-            )
+        self.assertEqual(
+            self.run_cli(
+                "--personality-file", str(prompt), "--output", str(self.output)
+            ),
+            0,
+        )
         self.assertEqual(self.source.read_bytes(), before)
         result = Asar(self.output)
         self.assertEqual(
@@ -180,12 +169,11 @@ class PatcherTests(unittest.TestCase):
 
     def test_check_is_read_only(self):
         before = self.source.read_bytes()
-        with self.trust_fixture():
-            self.assertEqual(self.run_cli("--check"), 0)
+        self.assertEqual(self.run_cli("--check"), 0)
         self.assertEqual(self.source.read_bytes(), before)
         self.assertFalse(self.output.exists())
 
-    def test_rejects_unknown_identity_region_code_and_ambiguous_owners_before_output(
+    def test_rejects_missing_edit_boundaries_and_ambiguous_owners_before_output(
         self,
     ):
         for fault in ("identity", "text", "rpc", "call", "ambiguous"):
@@ -200,12 +188,18 @@ class PatcherTests(unittest.TestCase):
                 else:
                     owner = MAIN if fault == "text" else INITIAL
                     original = {"text": TEXT, "rpc": RPC, "call": CALL}[fault]
+                    changed = {
+                        "text": TEXT.replace(
+                            "getProjectAwareDeveloperInstructions", "differentMethod"
+                        ),
+                        "rpc": RPC.replace("prompt:s}", "different:s}"),
+                        "call": CALL.replace("instructions:i", "instructions:other"),
+                    }[fault]
                     files[owner] = files[owner].replace(
-                        original.encode(), (original[:-1] + ";changed()}").encode()
+                        original.encode(), changed.encode()
                     )
                 fixture(self.source, files)
-                with self.trust_fixture():
-                    self.assertEqual(self.run_cli("--check"), 1)
+                self.assertEqual(self.run_cli("--check"), 1)
                 self.assertFalse(self.output.exists())
 
     def test_unrelated_code_version_and_chunk_filename_changes_are_accepted(self):
@@ -219,36 +213,89 @@ class PatcherTests(unittest.TestCase):
             files.pop(INITIAL) + b"unrelated();"
         )
         fixture(self.source, files)
-        with self.trust_fixture():
-            self.assertEqual(self.run_cli("--output", str(self.output)), 0)
+        self.assertEqual(self.run_cli("--output", str(self.output)), 0)
         self.assertEqual(Asar(self.output).read("unrelated.js"), files["unrelated.js"])
 
+    def test_changed_native_bodies_and_renamed_prompt_bindings_are_preserved(self):
+        files = dict(self.files)
+        text = TEXT.replace("return native", "let added=1;return native")
+        rpc = RPC.replace("prompt:s", "prompt:custom").replace(
+            "...s==null", "...custom==null"
+        )
+        call = CALL.replace("prompt:i", "prompt:custom").replace(
+            "instructions:i", "instructions:custom"
+        )
+        files[MAIN] = files[MAIN].replace(TEXT.encode(), text.encode())
+        files[INITIAL] = (rpc + call + "var untouched=2;").encode()
+        fixture(self.source, files)
+        self.assertEqual(self.run_cli("--output", str(self.output)), 0)
+        result = Asar(self.output)
+        self.assertIn(text.split("){", 1)[1][:-1].encode(), result.read(MAIN))
+        self.assertEqual(
+            result.read(INITIAL),
+            (
+                regions.append_voice(regions.CodeRegion("rpc", rpc))
+                + regions.append_voice(regions.CodeRegion("call", call))
+                + "var untouched=2;"
+            ).encode(),
+        )
+
+    def test_text_wrapper_preserves_early_returns_nested_callbacks_and_receiver(self):
+        native = "async getProjectAwareDeveloperInstructions(e){if(!e)return this.empty;return [e].map(x=>{return x+this.suffix}).join(arguments[1])}"
+        transformed = regions.append_text(regions.CodeRegion("text", native))
+        subprocess.run(
+            [
+                "node",
+                "-e",
+                "const assert=require('node:assert/strict');globalThis.__codexUserPersonality={append:x=>x+' appended'};const owner={empty:'empty',suffix:' suffix',"
+                + transformed
+                + "};(async()=>{assert.equal(await owner.getProjectAwareDeveloperInstructions('native',','),'native suffix appended');assert.equal(await owner.getProjectAwareDeveloperInstructions(null),'empty appended')})().catch(e=>{console.error(e);process.exitCode=1})",
+            ],
+            check=True,
+        )
+
+    def test_function_boundaries_ignore_js_literals_comments_and_neighbor_methods(self):
+        text = 'async getProjectAwareDeveloperInstructions(e){let a="}async fake(){",b=/[{}]/g,c=`outer ${`${e} }`} tail`;/* } */if(e)/}/.test(e);return e.replace(b,c)}'
+        source = text + "neighbor(){return 2}async next(){return 3}"
+        region = regions.extract(
+            source, "text", r"async getProjectAwareDeveloperInstructions\("
+        )
+        self.assertEqual(region.source, text)
+        transformed = regions.append_text(region)
+        subprocess.run(
+            ["node", "--check"], input="({" + transformed + "})", text=True, check=True
+        )
+        for broken in (text[:-1], text.replace("/* } */", "/* }")):
+            with self.assertRaises(UnsupportedBundle):
+                regions.extract(
+                    broken, "text", r"async getProjectAwareDeveloperInstructions\("
+                )
+
     def test_rejects_in_place_existing_output_and_symlink_without_clobber(self):
-        with self.trust_fixture():
-            self.assertEqual(
-                self.run_cli(
-                    "--personality-file", "/tmp/custom.md", "--output", str(self.source)
-                ),
-                1,
-            )
-            self.output.write_bytes(b"keep me")
-            self.assertEqual(
-                self.run_cli(
-                    "--personality-file", "/tmp/custom.md", "--output", str(self.output)
-                ),
-                1,
-            )
-            self.assertEqual(self.output.read_bytes(), b"keep me")
-            self.output.unlink()
-            self.output.symlink_to(self.directory / "absent")
-            self.assertEqual(
-                self.run_cli(
-                    "--personality-file", "/tmp/custom.md", "--output", str(self.output)
-                ),
-                1,
-            )
-            self.assertTrue(self.output.is_symlink())
-            self.assertFalse((self.directory / "absent").exists())
+        self.assertEqual(
+            self.run_cli(
+                "--personality-file", "/tmp/custom.md", "--output", str(self.source)
+            ),
+            1,
+        )
+        self.output.write_bytes(b"keep me")
+        self.assertEqual(
+            self.run_cli(
+                "--personality-file", "/tmp/custom.md", "--output", str(self.output)
+            ),
+            1,
+        )
+        self.assertEqual(self.output.read_bytes(), b"keep me")
+        self.output.unlink()
+        self.output.symlink_to(self.directory / "absent")
+        self.assertEqual(
+            self.run_cli(
+                "--personality-file", "/tmp/custom.md", "--output", str(self.output)
+            ),
+            1,
+        )
+        self.assertTrue(self.output.is_symlink())
+        self.assertFalse((self.directory / "absent").exists())
         self.assertEqual(
             sorted(p.name for p in self.directory.iterdir()),
             ["original.asar", "patched.asar"],
@@ -278,18 +325,17 @@ class PatcherTests(unittest.TestCase):
         }
         original = plistlib.dumps(document, fmt=plistlib.FMT_BINARY)
         source.write_bytes(original)
-        with self.trust_fixture():
-            self.assertEqual(
-                self.run_cli(
-                    "--info-plist",
-                    str(source),
-                    "--output-info-plist",
-                    str(output),
-                    "--output",
-                    str(self.output),
-                ),
-                0,
-            )
+        self.assertEqual(
+            self.run_cli(
+                "--info-plist",
+                str(source),
+                "--output-info-plist",
+                str(output),
+                "--output",
+                str(self.output),
+            ),
+            0,
+        )
         document["ElectronAsarIntegrity"]["Resources/app.asar"]["hash"] = Asar(
             self.output
         ).header_sha256
@@ -308,18 +354,17 @@ class PatcherTests(unittest.TestCase):
             }
         }
         source.write_bytes(plistlib.dumps(document))
-        with self.trust_fixture():
-            self.assertEqual(
-                self.run_cli(
-                    "--info-plist",
-                    str(source),
-                    "--output-info-plist",
-                    str(output),
-                    "--output",
-                    str(self.output),
-                ),
-                1,
-            )
+        self.assertEqual(
+            self.run_cli(
+                "--info-plist",
+                str(source),
+                "--output-info-plist",
+                str(output),
+                "--output",
+                str(self.output),
+            ),
+            1,
+        )
         self.assertFalse(self.output.exists())
         self.assertFalse(output.exists())
         document["ElectronAsarIntegrity"]["Resources/app.asar"]["hash"] = Asar(
@@ -327,18 +372,17 @@ class PatcherTests(unittest.TestCase):
         ).header_sha256
         source.write_bytes(plistlib.dumps(document))
         impossible = self.directory / "missing-parent" / "Info.plist"
-        with self.trust_fixture():
-            self.assertEqual(
-                self.run_cli(
-                    "--info-plist",
-                    str(source),
-                    "--output-info-plist",
-                    str(impossible),
-                    "--output",
-                    str(self.output),
-                ),
-                1,
-            )
+        self.assertEqual(
+            self.run_cli(
+                "--info-plist",
+                str(source),
+                "--output-info-plist",
+                str(impossible),
+                "--output",
+                str(self.output),
+            ),
+            1,
+        )
         self.assertFalse(self.output.exists())
 
     def test_rejects_truncation_out_of_bounds_and_partial_overlap(self):
