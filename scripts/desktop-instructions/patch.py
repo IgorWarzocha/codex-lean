@@ -113,13 +113,19 @@ def replacements(
         bundle.read(layout.initial).decode("utf-8"), layout.text
     )
     native_main = native_main.replace(layout.text.source, append_text(layout.text))
+    voice = (
+        initial
+        if layout.voice == layout.initial
+        else bundle.read(layout.voice).decode("utf-8")
+    )
     for region in (layout.rpc, layout.call):
-        initial = initial.replace(region.source, append_voice(region))
+        voice = voice.replace(region.source, append_voice(region))
     return {
         **app_instructions,
         layout.main: main.encode() + native_main.encode(),
         layout.preload: preload + bundle.read(layout.preload),
         layout.initial: initial.encode(),
+        layout.voice: voice.encode(),
     }
 
 

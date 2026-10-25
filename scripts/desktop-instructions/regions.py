@@ -20,6 +20,7 @@ class BundleLayout:
     main: str
     preload: str
     initial: str
+    voice: str
     text: CodeRegion
     rpc: CodeRegion
     call: CodeRegion
@@ -171,8 +172,23 @@ def inspect_regions(bundle: Asar) -> BundleLayout:
     main = bundle.read(main_path).decode("utf-8")
     initial = bundle.read(initial_path).decode("utf-8")
     preload = bundle.read(preload_path).decode("utf-8")
+    # Voice may be split out of app-initial. Locate its endpoint owner, not a
+    # chunk basename; reject competing owners instead of choosing one.
+    voice_modules = [
+        name
+        for name, entry in bundle.entries.items()
+        if re.fullmatch(r"webview/assets/[^/]+\.js", name)
+        and not entry.get("unpacked")
+        and "/wham/realtime/calls" in bundle.read(name).decode("utf-8")
+    ]
+    if len(voice_modules) != 1:
+        raise UnsupportedBundle("native voice module missing or ambiguous")
+    voice_path = voice_modules[0]
+    voice = bundle.read(voice_path).decode("utf-8")
     if any(
-        marker in source for source in (main, initial, preload) for marker in MARKERS
+        marker in source
+        for source in (main, initial, preload, voice)
+        for marker in MARKERS
     ):
         raise UnsupportedBundle("bundle is already patched; use an unpatched archive")
     if not re.match(rf"const {IDENTIFIER}=require\(", main):
@@ -192,14 +208,12 @@ def inspect_regions(bundle: Asar) -> BundleLayout:
     # Parameter order, local variable names, models and metadata are not gates.
     header = rf"async function {IDENTIFIER}\(\{{"
     rpc = extract(
-        initial,
+        voice,
         "rpc",
         header
         + r"(?=[^{}]*\bmanager:)(?=[^{}]*\bcodexResponsesAsItems:|[^{}]*\bcodexResponseHandoffPrefix:)",
     )
-    call = extract(
-        initial, "call", header + r"(?=[^{}]*\bofferSdp:)(?=[^{}]*\bprompt:)"
-    )
+    call = extract(voice, "call", header + r"(?=[^{}]*\bofferSdp:)(?=[^{}]*\bprompt:)")
     if "`thread/realtime/start`" not in rpc.source:
         raise UnsupportedBundle("native realtime start request missing")
     if "/wham/realtime/calls" not in call.source:
@@ -209,7 +223,9 @@ def inspect_regions(bundle: Asar) -> BundleLayout:
     append_voice(rpc)
     append_voice(call)
     skip_cloud_attachment_cleanup(initial, text)
-    return BundleLayout(main_path, preload_path, initial_path, text, rpc, call)
+    return BundleLayout(
+        main_path, preload_path, initial_path, voice_path, text, rpc, call
+    )
 
 
 def skip_cloud_attachment_cleanup(source: str, text: CodeRegion) -> str:

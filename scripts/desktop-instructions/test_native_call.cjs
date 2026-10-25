@@ -7,6 +7,7 @@ const { before, after, version, text, rpc } = JSON.parse(
   fs.readFileSync(0, "utf8"),
 );
 const suffix = "\n\nCommunication preferences";
+const clientOwned = version === "31256" || version === "22027";
 
 async function invoke(source, args) {
   const requests = [];
@@ -65,6 +66,15 @@ async function invoke(source, args) {
       oc: context.eg,
     });
   }
+  if (version === "22027") {
+    Object.assign(context, {
+      o: context.Kp,
+      Ke: context.Zm,
+      Rt: 256,
+      Lt: context.D9s,
+      R: context.eg,
+    });
+  }
   const call = vm.runInNewContext("(" + source + ")", context);
   const result = JSON.parse(JSON.stringify(await call(args)));
   return { requests, logs, result };
@@ -99,12 +109,13 @@ async function main() {
       const native = await invoke(before, args);
       const patched = await invoke(after, args);
       assert.equal(patched.requests.length, 1);
-      if (version === "31256") {
+      if (clientOwned) {
         const request = native.requests[0];
         assert.equal(request.body.sdp, args.offerSdp);
         assert.equal(
           request.body.session.model,
-          args.model ?? "gpt-live-1-codex",
+          args.model ??
+            (version === "22027" ? "gpt-live-1.1-codex" : "gpt-live-1-codex"),
         );
         assert.equal(
           request.body.session.voice_session_id,
@@ -136,9 +147,9 @@ async function main() {
     }
   }
   console.log("12 native call payload comparisons passed");
-  if (version === "31256") {
+  if (clientOwned) {
     await checkExistingCallRpc();
-    await checkTextComposer();
+    if (text) await checkTextComposer();
   }
 }
 

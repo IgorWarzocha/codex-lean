@@ -347,6 +347,52 @@ class AppInstructionsTests(unittest.TestCase):
         ):
             self.assertIn(expected, result.stdout)
 
+    def test_split_voice_module_preserves_native_payloads_and_other_modules(self):
+        capture = json.loads(
+            (HERE / "fixtures/linux-22027-instructions.json").read_text()
+        )
+        voice_path = "webview/assets/renamed-controller.js"
+        files = dict(self.files)
+        files[INITIAL] = b"var unrelatedInitialCode=1;"
+        files[voice_path] = (capture["rpc"] + capture["call"]).encode()
+        fixture(self.source, files)
+        self.assertEqual(self.invoke("--check"), 0)
+        self.assertEqual(self.invoke("--output", str(self.output)), 0)
+        patched = Asar(self.output)
+        self.assertEqual(patched.read(INITIAL), files[INITIAL])
+        rpc = regions.append_voice(regions.CodeRegion("rpc", capture["rpc"]))
+        call = regions.append_voice(regions.CodeRegion("call", capture["call"]))
+        self.assertEqual(patched.read(voice_path), (rpc + call).encode())
+        result = subprocess.run(
+            ["node", str(HERE / "test_native_call.cjs")],
+            input=json.dumps(
+                {
+                    "version": "22027",
+                    "before": capture["call"],
+                    "after": call,
+                    "rpc": {"before": capture["rpc"], "after": rpc},
+                }
+            ),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("12 native call payload comparisons passed", result.stdout)
+        self.assertIn("Existing-call RPC unchanged", result.stdout)
+        # Both missing and competing endpoint owners must fail without output.
+        for voice_modules in (
+            {},
+            {
+                voice_path: files[voice_path],
+                "webview/assets/duplicate.js": files[voice_path],
+            },
+        ):
+            invalid = {key: value for key, value in files.items() if key != voice_path}
+            invalid.update(voice_modules)
+            self.output.unlink(missing_ok=True)
+            self.assert_rejected_without_outputs(invalid)
+
     def check_shared_composer_and_native_voice(self, version):
         capture = json.loads(
             (HERE / f"fixtures/linux-{version}-instructions.json").read_text()
